@@ -206,4 +206,3 @@ The application uses:
 ## License
 
 This project is private and proprietary.
-
