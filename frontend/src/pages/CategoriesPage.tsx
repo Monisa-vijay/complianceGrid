@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { AlertCircle, CheckCircle, Clock, Search, Filter, X, Grid, List, Table, ChevronLeft, ChevronRight, Eye, EyeOff, ArrowLeft, User, Upload, Gauge } from 'lucide-react';
+import { AlertCircle, CheckCircle, Clock, Search, Filter, X, Grid, List, Table, ChevronLeft, ChevronRight, Eye, EyeOff, ArrowLeft, User, Upload } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { categoriesApi, Category } from '../api/categories';
 import { getReviewPeriodLabel, reviewPeriodOptions } from '../utils/reviewPeriods';
@@ -237,18 +237,6 @@ export const CategoriesPage: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-100">
-                  <span className="text-gray-500 flex items-center gap-1.5">
-                    <Gauge size={14} />
-                    Compliance Score:
-                  </span>
-                  <span className="font-semibold text-gray-900">
-                    {category.compliance_score !== undefined && category.compliance_score !== null
-                      ? `${category.compliance_score}%`
-                      : 'N/A'}
-                  </span>
-                </div>
-
                 {/* Status Badge */}
                 <div className="pt-3 mt-auto">
                   {getStatusBadge(category.current_submission)}
@@ -306,15 +294,6 @@ export const CategoriesPage: React.FC = () => {
                           : 'N/A'}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Gauge size={16} className="text-gray-400" />
-                      <span className="text-gray-500">Compliance:</span>
-                      <span className="font-semibold text-gray-900">
-                        {category.compliance_score !== undefined && category.compliance_score !== null
-                          ? `${category.compliance_score}%`
-                          : 'N/A'}
-                      </span>
-                    </div>
                   </div>
                 </div>
                 <div className="flex-shrink-0">
@@ -347,9 +326,6 @@ export const CategoriesPage: React.FC = () => {
             </th>
             <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
               Last Uploaded
-            </th>
-            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
-              Compliance Score
             </th>
           </tr>
         </thead>
@@ -397,16 +373,6 @@ export const CategoriesPage: React.FC = () => {
                 <span className="text-sm font-medium text-gray-900">
                   {getLastUploadedDate(category) 
                     ? new Date(getLastUploadedDate(category)!).toLocaleDateString()
-                    : 'N/A'}
-                </span>
-              </div>
-            </td>
-            <td className="px-6 py-4 whitespace-nowrap">
-              <div className="flex items-center gap-2">
-                <Gauge size={14} className="text-gray-400" />
-                <span className="text-sm font-medium text-gray-900">
-                  {category.compliance_score !== undefined && category.compliance_score !== null
-                    ? `${category.compliance_score}%`
                     : 'N/A'}
                 </span>
               </div>
