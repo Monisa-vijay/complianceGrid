@@ -68,10 +68,22 @@ class Command(BaseCommand):
         # Update or create users
         updated_users = []
         for user_data in users_to_keep:
-            # Try to find user by email first
+            # Try to find user by email first (handle duplicates by using first())
             user = None
-            try:
-                user = User.objects.get(email=user_data['email'])
+            users_with_email = User.objects.filter(email=user_data['email'])
+            if users_with_email.exists():
+                # If multiple users with same email, use the first one and delete others
+                user = users_with_email.first()
+                # Delete other users with the same email (duplicates)
+                duplicates = users_with_email.exclude(id=user.id)
+                if duplicates.exists():
+                    duplicates_count = duplicates.count()
+                    duplicates.delete()
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f'Deleted {duplicates_count} duplicate user(s) with email {user_data["email"]}'
+                        )
+                    )
                 # Update existing user
                 user.username = user_data['username']
                 user.first_name = user_data['first_name']
@@ -80,7 +92,7 @@ class Command(BaseCommand):
                 user.set_password('Data@123')  # Reset password to default
                 user.save()
                 created = False
-            except User.DoesNotExist:
+            else:
                 # Try to find by username
                 try:
                     user = User.objects.get(username=user_data['username'])

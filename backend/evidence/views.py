@@ -932,10 +932,23 @@ class LoginView(APIView):
         
         # Try to find user by email first
         try:
-            user = User.objects.get(email=email)
-            username = user.username
-        except User.DoesNotExist:
-            # Fallback to username if email not found
+            users = User.objects.filter(email=email)
+            if users.exists():
+                # If multiple users with same email, use the first one
+                user = users.first()
+                username = user.username
+            else:
+                # Fallback to username if email not found
+                try:
+                    user = User.objects.get(username=email)
+                    username = user.username
+                except User.DoesNotExist:
+                    return Response(
+                        {'error': 'Invalid email or password'},
+                        status=status.HTTP_401_UNAUTHORIZED
+                    )
+        except Exception:
+            # Fallback to username if any error
             try:
                 user = User.objects.get(username=email)
                 username = user.username
@@ -1338,22 +1351,36 @@ class GoogleOAuthCallbackView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Create or get user
-            user, created = User.objects.get_or_create(
-                username=email,
-                defaults={
-                    'email': email,
-                    'first_name': user_info.get('given_name', ''),
-                    'last_name': user_info.get('family_name', ''),
-                }
-            )
+            # Create or get user - check by email first to avoid duplicates
+            user = None
+            try:
+                # Try to find user by email first
+                user = User.objects.filter(email=email).first()
+                if user:
+                    # Update existing user
+                    user.first_name = user_info.get('given_name', '')
+                    user.last_name = user_info.get('family_name', '')
+                    user.save()
+            except Exception:
+                pass
             
-            if not created:
-                # Update existing user
-                user.email = email
-                user.first_name = user_info.get('given_name', '')
-                user.last_name = user_info.get('family_name', '')
-                user.save()
+            # If no user found by email, try to get or create by username
+            if not user:
+                user, created = User.objects.get_or_create(
+                    username=email,
+                    defaults={
+                        'email': email,
+                        'first_name': user_info.get('given_name', ''),
+                        'last_name': user_info.get('family_name', ''),
+                    }
+                )
+                
+                if not created:
+                    # Update existing user
+                    user.email = email
+                    user.first_name = user_info.get('given_name', '')
+                    user.last_name = user_info.get('family_name', '')
+                    user.save()
             
             # Store Google access token in session
             request.session['google_access_token'] = access_token
