@@ -298,7 +298,7 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
                     parent_folder_id = drive_service.create_folder(parent_name, parent_folder_id=root_folder_id)
                     setattr(folder_mapping, parent_field, parent_folder_id)
                 
-                # Create subcategory folders
+                # Create subcategory folders (category group folders)
                 for group_code in group_codes:
                     if group_code not in category_group_folder_ids:
                         # Get the label for this group
@@ -310,9 +310,42 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
             folder_mapping.category_group_folder_ids = category_group_folder_ids
             folder_mapping.save()
             
+            # Step 2: Create folders for each EvidenceCategory (control) inside their category group folders
+            categories_created = 0
+            categories_skipped = 0
+            for group_code, group_folder_id in category_group_folder_ids.items():
+                # Get all categories for this group
+                categories = EvidenceCategory.objects.filter(
+                    category_group=group_code,
+                    is_active=True
+                )
+                
+                for category in categories:
+                    # Skip if folder already exists
+                    if category.google_drive_folder_id:
+                        categories_skipped += 1
+                        continue
+                    
+                    # Create folder for this category (control)
+                    try:
+                        category_folder_id = drive_service.create_folder(
+                            category.name,
+                            parent_folder_id=group_folder_id
+                        )
+                        # Store folder ID in category
+                        category.google_drive_folder_id = category_folder_id
+                        category.save()
+                        categories_created += 1
+                    except Exception as e:
+                        # Log error but continue with other categories
+                        print(f"Error creating folder for category {category.name}: {str(e)}")
+                        continue
+            
             return Response({
                 'message': 'Folder structure created successfully',
                 'root_folder_id': root_folder_id,
+                'categories_created': categories_created,
+                'categories_skipped': categories_skipped,
                 'folder_mapping': {
                     'security_folder_id': folder_mapping.security_folder_id,
                     'availability_folder_id': folder_mapping.availability_folder_id,
@@ -665,11 +698,25 @@ class EvidenceSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
         notes = request.data.get('notes', '')
         due_date_str = request.data.get('due_date')
         
-        # Save files locally
+        # Save files locally and to Google Drive
         try:
             category = submission.category
             uploaded_files = []
+            
+            # Get Google Drive access token from session
+            access_token = request.session.get('google_access_token')
+            drive_service = None
+            if access_token and category.google_drive_folder_id:
+                try:
+                    drive_service = GoogleDriveService(access_token=access_token)
+                except Exception as e:
+                    print(f"Warning: Could not initialize Google Drive service: {str(e)}")
+            
             for file in files:
+                # Read file content for Google Drive upload
+                file_content = file.read()
+                file.seek(0)  # Reset file pointer for local save
+                
                 # Create EvidenceFile record with local file storage
                 evidence_file = EvidenceFile.objects.create(
                     submission=submission,
@@ -679,6 +726,24 @@ class EvidenceSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
                     mime_type=file.content_type or 'application/octet-stream',
                     uploaded_by=request.user if request.user.is_authenticated else None
                 )
+                
+                # Upload to Google Drive if folder ID exists and service is available
+                if drive_service and category.google_drive_folder_id:
+                    try:
+                        drive_result = drive_service.upload_file(
+                            file_content=file_content,
+                            filename=file.name,
+                            folder_id=category.google_drive_folder_id,
+                            mime_type=file.content_type or 'application/octet-stream'
+                        )
+                        # Store Google Drive file info
+                        evidence_file.google_drive_file_id = drive_result['file_id']
+                        evidence_file.google_drive_file_url = drive_result['web_url']
+                        evidence_file.save()
+                    except Exception as e:
+                        # Log error but don't fail the upload - file is saved locally
+                        print(f"Warning: Could not upload {file.name} to Google Drive: {str(e)}")
+                
                 uploaded_files.append(evidence_file)
             
             # Update submission
@@ -992,6 +1057,9 @@ class AuthView(viewsets.ViewSet):
         print(f"DEBUG: /auth/me/ called - session_key: {session_key}, auth_user_id in session: {auth_user_id}, user: {request.user}, authenticated: {request.user.is_authenticated}")
         print(f"DEBUG: Cookies in request: {request.COOKIES}")
         
+        # Check Google Drive authentication status
+        google_drive_authenticated = bool(request.session.get('google_access_token'))
+        
         # If we have auth_user_id in session but user is not authenticated, try to get user manually
         if not request.user.is_authenticated and auth_user_id:
             from django.contrib.auth.models import User
@@ -999,15 +1067,24 @@ class AuthView(viewsets.ViewSet):
                 user = User.objects.get(pk=auth_user_id)
                 print(f"DEBUG: Found user from session auth_user_id: {user.username}")
                 serializer = UserSerializer(user)
-                return Response({'user': serializer.data})
+                return Response({
+                    'user': serializer.data,
+                    'google_drive_authenticated': google_drive_authenticated
+                })
             except User.DoesNotExist:
                 print(f"DEBUG: User with id {auth_user_id} does not exist")
         
         if request.user.is_authenticated:
             serializer = UserSerializer(request.user)
-            return Response({'user': serializer.data})
+            return Response({
+                'user': serializer.data,
+                'google_drive_authenticated': google_drive_authenticated
+            })
         else:
-            return Response({'user': None}, status=status.HTTP_200_OK)
+            return Response({
+                'user': None,
+                'google_drive_authenticated': False
+            }, status=status.HTTP_200_OK)
     
     @action(detail=False, methods=['get'])
     def csrf(self, request):
