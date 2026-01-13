@@ -3,7 +3,7 @@ from django.core.mail import send_mail
 from django.utils import timezone
 from django.conf import settings
 from datetime import timedelta
-from evidence.models import EvidenceSubmission, EvidenceStatus, ReminderLog
+from evidence.models import EvidenceSubmission, EvidenceStatus, ReminderLog, Notification
 
 
 class Command(BaseCommand):
@@ -23,6 +23,9 @@ class Command(BaseCommand):
         
         # Overdue reminders
         self.send_overdue_reminders(today)
+        
+        # Due date notifications (in-app notifications for assignees on due date)
+        self.send_due_date_notifications(today)
         
         self.stdout.write(self.style.SUCCESS('Successfully sent reminders'))
 
@@ -124,4 +127,41 @@ ComplianceGrid System
                 self.stdout.write(self.style.WARNING(f"No email address for submission {submission.id}"))
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"Failed to send email: {str(e)}"))
+    
+    def send_due_date_notifications(self, today):
+        """Send in-app notifications to assignees on due date"""
+        submissions = EvidenceSubmission.objects.filter(
+            due_date=today,
+            status=EvidenceStatus.PENDING
+        ).select_related('category', 'category__assignee')
+        
+        notifications_created = 0
+        for submission in submissions:
+            category = submission.category
+            # Send notification to assignee if exists
+            if category.assignee:
+                # Check if notification already exists for this submission today
+                existing_notification = Notification.objects.filter(
+                    user=category.assignee,
+                    submission=submission,
+                    notification_type='OVERDUE',
+                    created_at__date=today
+                ).first()
+                
+                if not existing_notification:
+                    # Create notification with link to control-file page
+                    Notification.objects.create(
+                        user=category.assignee,
+                        notification_type='OVERDUE',
+                        title=f'Due Today: {category.name}',
+                        message=f'Evidence submission for "{category.name}" is due today. Please submit your evidence files.',
+                        category=category,
+                        submission=submission,
+                        is_read=False
+                    )
+                    notifications_created += 1
+                    self.stdout.write(f"Created due date notification for {category.name} to {category.assignee.username}")
+        
+        if notifications_created > 0:
+            self.stdout.write(self.style.SUCCESS(f'Created {notifications_created} due date notification(s)'))
 

@@ -35,6 +35,47 @@ from django.conf import settings
 import requests
 
 
+def create_due_date_notifications():
+    """
+    Automatically create notifications for assignees when due date arrives.
+    This function checks for submissions with due_date = today and creates notifications
+    if they don't already exist. Called automatically from key endpoints.
+    """
+    today = timezone.now().date()
+    submissions = EvidenceSubmission.objects.filter(
+        due_date=today,
+        status=EvidenceStatus.PENDING
+    ).select_related('category', 'category__assignee')
+    
+    notifications_created = 0
+    for submission in submissions:
+        category = submission.category
+        # Send notification to assignee if exists
+        if category.assignee:
+            # Check if notification already exists for this submission today
+            existing_notification = Notification.objects.filter(
+                user=category.assignee,
+                submission=submission,
+                notification_type='OVERDUE',
+                created_at__date=today
+            ).first()
+            
+            if not existing_notification:
+                # Create notification with link to control-file page
+                Notification.objects.create(
+                    user=category.assignee,
+                    notification_type='OVERDUE',
+                    title=f'Due Today: {category.name}',
+                    message=f'Evidence submission for "{category.name}" is due today. Please submit your evidence files.',
+                    category=category,
+                    submission=submission,
+                    is_read=False
+                )
+                notifications_created += 1
+    
+    return notifications_created
+
+
 class EvidenceCategoryViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing evidence categories
@@ -235,7 +276,13 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
         
         try:
             # Initialize Google Drive service
-            drive_service = GoogleDriveService(access_token=access_token)
+            refresh_token = request.session.get('google_refresh_token')
+            if not access_token:
+                return Response(
+                    {'error': 'Google Drive not authenticated. Please authenticate Google Drive first.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            drive_service = GoogleDriveService(access_token=access_token, refresh_token=refresh_token)
             
             # Define folder structure mapping
             # Parent categories and their subcategories
@@ -338,14 +385,81 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
                         categories_created += 1
                     except Exception as e:
                         # Log error but continue with other categories
-                        print(f"Error creating folder for category {category.name}: {str(e)}")
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.error(f"Error creating folder for category {category.name}: {str(e)}")
                         continue
             
-            return Response({
-                'message': 'Folder structure created successfully',
+            # Step 3: Sync files - Upload any approved files that haven't been uploaded to Google Drive yet
+            files_uploaded = 0
+            files_skipped = 0
+            files_failed = 0
+            upload_errors = []
+            
+            # Get all approved submissions with files that haven't been uploaded
+            approved_submissions = EvidenceSubmission.objects.filter(
+                status=EvidenceStatus.APPROVED
+            ).prefetch_related('files', 'category')
+            
+            for submission in approved_submissions:
+                category = submission.category
+                # Skip if category doesn't have a Google Drive folder ID
+                if not category.google_drive_folder_id:
+                    continue
+                
+                # Get files that haven't been uploaded to Google Drive yet
+                files_to_upload = submission.files.filter(google_drive_file_id__isnull=True)
+                
+                for evidence_file in files_to_upload:
+                    if evidence_file.file:  # Check if local file exists
+                        try:
+                            # Read file content
+                            evidence_file.file.open('rb')
+                            file_content = evidence_file.file.read()
+                            evidence_file.file.close()
+                            
+                            # Upload to Google Drive
+                            drive_result = drive_service.upload_file(
+                                file_content=file_content,
+                                filename=evidence_file.filename,
+                                folder_id=category.google_drive_folder_id,
+                                mime_type=evidence_file.mime_type
+                            )
+                            
+                            # Store Google Drive file info
+                            evidence_file.google_drive_file_id = drive_result['file_id']
+                            evidence_file.google_drive_file_url = drive_result['web_url']
+                            evidence_file.save()
+                            files_uploaded += 1
+                        except Exception as e:
+                            # Log error but continue with other files
+                            import logging
+                            logger = logging.getLogger(__name__)
+                            error_msg = f"Failed to upload {evidence_file.filename} to Google Drive: {str(e)}"
+                            logger.error(error_msg)
+                            upload_errors.append(error_msg)
+                            files_failed += 1
+                    else:
+                        error_msg = f"Local file not found for {evidence_file.filename}"
+                        upload_errors.append(error_msg)
+                        files_failed += 1
+            
+            # Build response message
+            message_parts = ['Folder structure synced successfully']
+            if categories_created > 0:
+                message_parts.append(f'{categories_created} category folder(s) created')
+            if files_uploaded > 0:
+                message_parts.append(f'{files_uploaded} file(s) uploaded to Google Drive')
+            if files_failed > 0:
+                message_parts.append(f'{files_failed} file(s) failed to upload')
+            
+            response_data = {
+                'message': '. '.join(message_parts) + '.',
                 'root_folder_id': root_folder_id,
                 'categories_created': categories_created,
                 'categories_skipped': categories_skipped,
+                'files_uploaded': files_uploaded,
+                'files_failed': files_failed,
                 'folder_mapping': {
                     'security_folder_id': folder_mapping.security_folder_id,
                     'availability_folder_id': folder_mapping.availability_folder_id,
@@ -353,7 +467,12 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
                     'common_criteria_folder_id': folder_mapping.common_criteria_folder_id,
                     'category_group_folder_ids': category_group_folder_ids
                 }
-            })
+            }
+            
+            if upload_errors:
+                response_data['upload_errors'] = upload_errors
+            
+            return Response(response_data)
             
         except Exception as e:
             import traceback
@@ -686,6 +805,19 @@ class EvidenceSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Validate that category has both assignee and approver
+        category = submission.category
+        if not category.assignee:
+            return Response(
+                {'error': 'Cannot submit files: Assignee is required for this control.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not category.approver:
+            return Response(
+                {'error': 'Cannot submit files: Approver is required for this control.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         # Get files from request
         files = request.FILES.getlist('files')
         if not files:
@@ -698,26 +830,12 @@ class EvidenceSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
         notes = request.data.get('notes', '')
         due_date_str = request.data.get('due_date')
         
-        # Save files locally and to Google Drive
+        # Save files locally (Google Drive upload will happen after approval)
         try:
-            category = submission.category
             uploaded_files = []
             
-            # Get Google Drive access token from session
-            access_token = request.session.get('google_access_token')
-            drive_service = None
-            if access_token and category.google_drive_folder_id:
-                try:
-                    drive_service = GoogleDriveService(access_token=access_token)
-                except Exception as e:
-                    print(f"Warning: Could not initialize Google Drive service: {str(e)}")
-            
             for file in files:
-                # Read file content for Google Drive upload
-                file_content = file.read()
-                file.seek(0)  # Reset file pointer for local save
-                
-                # Create EvidenceFile record with local file storage
+                # Create EvidenceFile record with local file storage only
                 evidence_file = EvidenceFile.objects.create(
                     submission=submission,
                     filename=file.name,
@@ -726,23 +844,6 @@ class EvidenceSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
                     mime_type=file.content_type or 'application/octet-stream',
                     uploaded_by=request.user if request.user.is_authenticated else None
                 )
-                
-                # Upload to Google Drive if folder ID exists and service is available
-                if drive_service and category.google_drive_folder_id:
-                    try:
-                        drive_result = drive_service.upload_file(
-                            file_content=file_content,
-                            filename=file.name,
-                            folder_id=category.google_drive_folder_id,
-                            mime_type=file.content_type or 'application/octet-stream'
-                        )
-                        # Store Google Drive file info
-                        evidence_file.google_drive_file_id = drive_result['file_id']
-                        evidence_file.google_drive_file_url = drive_result['web_url']
-                        evidence_file.save()
-                    except Exception as e:
-                        # Log error but don't fail the upload - file is saved locally
-                        print(f"Warning: Could not upload {file.name} to Google Drive: {str(e)}")
                 
                 uploaded_files.append(evidence_file)
             
@@ -763,6 +864,18 @@ class EvidenceSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
             
             submission.save()
             
+            # Send notification to approver
+            if category.approver:
+                Notification.objects.create(
+                    user=category.approver,
+                    notification_type='PENDING_APPROVAL',
+                    title=f'Pending Approval: {category.name}',
+                    message=f'New evidence files have been submitted for "{category.name}" and are awaiting your approval.',
+                    category=category,
+                    submission=submission,
+                    is_read=False
+                )
+            
             serializer = EvidenceSubmissionSerializer(submission, context={'request': request})
             return Response(serializer.data, status=status.HTTP_200_OK)
             
@@ -774,7 +887,7 @@ class EvidenceSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
     
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
-        """Approve a submission"""
+        """Approve a submission and upload files to Google Drive"""
         submission = self.get_object()
         
         if submission.status != EvidenceStatus.SUBMITTED and submission.status != EvidenceStatus.UNDER_REVIEW:
@@ -785,14 +898,109 @@ class EvidenceSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
         
         review_notes = request.data.get('review_notes', '')
         
+        # Update submission status
         submission.status = EvidenceStatus.APPROVED
         submission.reviewed_by = request.user if request.user.is_authenticated else None
         submission.reviewed_at = timezone.now()
         submission.review_notes = review_notes
         submission.save()
         
+        # Upload files to Google Drive after approval
+        category = submission.category
+        upload_errors = []
+        uploaded_count = 0
+        
+        if category.google_drive_folder_id:
+            access_token = request.session.get('google_access_token')
+            refresh_token = request.session.get('google_refresh_token')
+            
+            if not access_token:
+                # Try to get token from any user's session (since Google Drive is shared)
+                # Check if there's a way to get a shared token or use the first authenticated user
+                from django.contrib.sessions.models import Session
+                
+                # Try to find a recent session with Google Drive token
+                # Look for sessions from the last 24 hours
+                recent_sessions = Session.objects.filter(expire_date__gte=timezone.now())
+                for session in recent_sessions:
+                    try:
+                        session_data = session.get_decoded()
+                        if 'google_access_token' in session_data:
+                            access_token = session_data['google_access_token']
+                            refresh_token = session_data.get('google_refresh_token')
+                            break
+                    except Exception:
+                        continue
+            
+            if access_token:
+                try:
+                    drive_service = GoogleDriveService(access_token=access_token, refresh_token=refresh_token)
+                    # Get all files for this submission that haven't been uploaded to Google Drive yet
+                    files_to_upload = submission.files.filter(google_drive_file_id__isnull=True)
+                    
+                    if not files_to_upload.exists():
+                        # All files already uploaded
+                        serializer = EvidenceSubmissionSerializer(submission)
+                        return Response({
+                            **serializer.data,
+                            'message': 'Submission approved. All files were already uploaded to Google Drive.'
+                        })
+                    
+                    for evidence_file in files_to_upload:
+                        if evidence_file.file:  # Check if local file exists
+                            try:
+                                # Read file content
+                                evidence_file.file.open('rb')
+                                file_content = evidence_file.file.read()
+                                evidence_file.file.close()
+                                
+                                # Upload to Google Drive
+                                drive_result = drive_service.upload_file(
+                                    file_content=file_content,
+                                    filename=evidence_file.filename,
+                                    folder_id=category.google_drive_folder_id,
+                                    mime_type=evidence_file.mime_type
+                                )
+                                
+                                # Store Google Drive file info
+                                evidence_file.google_drive_file_id = drive_result['file_id']
+                                evidence_file.google_drive_file_url = drive_result['web_url']
+                                evidence_file.save()
+                                uploaded_count += 1
+                            except Exception as e:
+                                # Log error and collect for response
+                                import logging
+                                logger = logging.getLogger(__name__)
+                                error_msg = f"Failed to upload {evidence_file.filename} to Google Drive: {str(e)}"
+                                logger.error(error_msg)
+                                upload_errors.append(error_msg)
+                        else:
+                            error_msg = f"Local file not found for {evidence_file.filename}"
+                            upload_errors.append(error_msg)
+                            
+                except Exception as e:
+                    # Log error and collect for response
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    error_msg = f"Failed to initialize Google Drive service: {str(e)}"
+                    logger.error(error_msg)
+                    upload_errors.append(error_msg)
+            else:
+                upload_errors.append("Google Drive not authenticated. Please authenticate Google Drive first.")
+        else:
+            upload_errors.append("Google Drive folder not configured for this category.")
+        
         serializer = EvidenceSubmissionSerializer(submission)
-        return Response(serializer.data)
+        response_data = serializer.data
+        
+        # Add upload status to response
+        if uploaded_count > 0:
+            response_data['upload_status'] = f'Successfully uploaded {uploaded_count} file(s) to Google Drive.'
+        if upload_errors:
+            response_data['upload_errors'] = upload_errors
+            response_data['upload_warning'] = 'Submission approved, but some files could not be uploaded to Google Drive.'
+        
+        return Response(response_data)
     
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
@@ -824,6 +1032,9 @@ class EvidenceSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def dashboard(self, request):
         """Get dashboard statistics with gap analysis"""
+        # Automatically create due date notifications
+        create_due_date_notifications()
+        
         today = timezone.now().date()
         start_of_month = today.replace(day=1)
         
@@ -1520,6 +1731,9 @@ class NotificationViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Get notifications for the current user or all users if no user specified"""
+        # Automatically create due date notifications when checking notifications
+        create_due_date_notifications()
+        
         queryset = Notification.objects.select_related('user', 'category', 'submission').all()
         
         # Filter by user if provided

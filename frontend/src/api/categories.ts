@@ -193,6 +193,11 @@ export const categoriesApi = {
   createGoogleDriveFolders: async (): Promise<{
     message: string;
     root_folder_id: string;
+    categories_created?: number;
+    categories_skipped?: number;
+    files_uploaded?: number;
+    files_failed?: number;
+    upload_errors?: string[];
     folder_mapping: {
       security_folder_id: string;
       availability_folder_id: string;

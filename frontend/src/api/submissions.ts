@@ -59,7 +59,11 @@ export const submissionsApi = {
     return response.data;
   },
 
-  approve: async (id: number, reviewNotes?: string): Promise<Submission> => {
+  approve: async (id: number, reviewNotes?: string): Promise<Submission & {
+    upload_status?: string;
+    upload_warning?: string;
+    upload_errors?: string[];
+  }> => {
     const response = await apiClient.post(`/submissions/${id}/approve/`, {
       review_notes: reviewNotes,
     });

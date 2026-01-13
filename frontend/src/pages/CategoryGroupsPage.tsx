@@ -94,16 +94,43 @@ export const CategoryGroupsPage: React.FC = () => {
 
     setCreatingFolders(true);
     try {
-      toast.loading('Syncing Google Drive folder structure...', { id: 'create-folders' });
+      toast.loading('Syncing Google Drive folder structure and files...', { id: 'create-folders' });
       const result = await categoriesApi.createGoogleDriveFolders();
-      toast.success(result.message || 'Folder structure synced successfully!', { id: 'create-folders' });
+      
+      // Show success message with details
+      const messageParts = [result.message || 'Sync completed successfully!'];
+      if (result.files_uploaded && result.files_uploaded > 0) {
+        messageParts.push(`${result.files_uploaded} file(s) uploaded`);
+      }
+      if (result.categories_created && result.categories_created > 0) {
+        messageParts.push(`${result.categories_created} folder(s) created`);
+      }
+      
+      toast.success(messageParts.join('. '), { id: 'create-folders', duration: 5000 });
+      
+      // Show warnings/errors if any files failed
+      if (result.files_failed && result.files_failed > 0) {
+        toast.error(`${result.files_failed} file(s) failed to upload. Check console for details.`, { 
+          id: 'sync-errors', 
+          duration: 7000 
+        });
+        
+        // Log detailed errors to console
+        if (result.upload_errors && Array.isArray(result.upload_errors)) {
+          console.error('File upload errors:', result.upload_errors);
+          result.upload_errors.forEach((error: string) => {
+            toast.error(error, { duration: 5000 });
+          });
+        }
+      }
+      
       // Refresh authentication status after successful sync
       await checkGoogleDriveAuth();
     } catch (error: any) {
-      console.error('Error creating folders:', error);
+      console.error('Error syncing:', error);
       
       // Handle specific error cases
-      let errorMessage = error.response?.data?.error || error.response?.data?.detail || error.message || 'Failed to create folder structure';
+      let errorMessage = error.response?.data?.error || error.response?.data?.detail || error.message || 'Failed to sync';
       
       // If CSRF error, suggest refreshing the page
       if (errorMessage.toLowerCase().includes('csrf')) {
@@ -111,7 +138,7 @@ export const CategoryGroupsPage: React.FC = () => {
       }
       // If Google auth required, provide helpful message
       else if (errorMessage.toLowerCase().includes('google') || errorMessage.toLowerCase().includes('authentication')) {
-        errorMessage = 'Google Drive authentication required. Please click "Authenticate Google Drive" first.';
+        errorMessage = 'Google Drive authentication required. Please click "Authenticate" first.';
       }
       
       toast.error(errorMessage, { id: 'create-folders', duration: 5000 });

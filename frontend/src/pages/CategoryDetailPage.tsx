@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Upload, File, X, AlertCircle, Edit, Eye, EyeOff, Save, ArrowLeft, User } from 'lucide-react';
+import { Upload, File, X, AlertCircle, Edit, Eye, EyeOff, Save, ArrowLeft, User, CheckCircle, XCircle } from 'lucide-react';
 import { categoriesApi, CategoryDetail } from '../api/categories';
 import { submissionsApi } from '../api/submissions';
 import { DatePickerModal } from '../components/DatePickerModal';
@@ -21,6 +21,11 @@ export const CategoryDetailPage: React.FC = () => {
   const [selectedDueDate, setSelectedDueDate] = useState<Date | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [users, setUsers] = useState<Array<{ id: number; username: string; email: string; first_name: string; last_name: string }>>([]);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewAction, setReviewAction] = useState<'approve' | 'reject' | null>(null);
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [processingReview, setProcessingReview] = useState(false);
   const [editForm, setEditForm] = useState({
     name: '',
     description: '',
@@ -35,6 +40,16 @@ export const CategoryDetailPage: React.FC = () => {
       fetchCategoryDetail();
     }
     fetchUsers();
+    // Load current user from localStorage
+    const userStr = localStorage.getItem('user');
+    if (userStr) {
+      try {
+        const userData = JSON.parse(userStr);
+        setCurrentUser(userData);
+      } catch (error) {
+        console.error('Error parsing user from localStorage:', error);
+      }
+    }
   }, [id]);
 
   const fetchUsers = async () => {
@@ -236,6 +251,68 @@ export const CategoryDetailPage: React.FC = () => {
   const canSubmit =
     category.current_submission?.status === 'PENDING' ||
     category.current_submission?.status === 'REJECTED';
+
+  // Check if current user is the approver
+  const isApprover = currentUser && category.approver && currentUser.id === category.approver.id;
+
+  // Check if submission can be approved/rejected
+  const canReview = category.current_submission && 
+    (category.current_submission.status === 'SUBMITTED' || category.current_submission.status === 'UNDER_REVIEW') &&
+    isApprover;
+
+  const handleApproveClick = () => {
+    setReviewAction('approve');
+    setReviewNotes('');
+    setShowReviewModal(true);
+  };
+
+  const handleRejectClick = () => {
+    setReviewAction('reject');
+    setReviewNotes('');
+    setShowReviewModal(true);
+  };
+
+  const handleReviewSubmit = async () => {
+    if (!category?.current_submission || !reviewAction) return;
+
+    if (reviewAction === 'reject' && !reviewNotes.trim()) {
+      toast.error('Review notes are required for rejection');
+      return;
+    }
+
+    setProcessingReview(true);
+    try {
+      if (reviewAction === 'approve') {
+        const response = await submissionsApi.approve(category.current_submission.id, reviewNotes);
+        // Check for upload status and errors in response
+        if (response.upload_status) {
+          toast.success(response.upload_status);
+        } else if (response.upload_warning) {
+          toast.success('Submission approved successfully!', { duration: 3000 });
+          toast.error(response.upload_warning, { duration: 5000 });
+          if (response.upload_errors && Array.isArray(response.upload_errors)) {
+            response.upload_errors.forEach((error: string) => {
+              toast.error(error, { duration: 4000 });
+            });
+          }
+        } else {
+          toast.success('Submission approved successfully! Files will be uploaded to Google Drive.');
+        }
+      } else {
+        await submissionsApi.reject(category.current_submission.id, reviewNotes);
+        toast.success('Submission rejected successfully!');
+      }
+      setShowReviewModal(false);
+      setReviewNotes('');
+      setReviewAction(null);
+      fetchCategoryDetail(); // Refresh to get updated status
+    } catch (error: any) {
+      console.error('Error reviewing submission:', error);
+      toast.error(error.response?.data?.error || `Failed to ${reviewAction} submission`);
+    } finally {
+      setProcessingReview(false);
+    }
+  };
 
   return (
     <div className="container mx-auto p-6 max-w-6xl">
@@ -554,6 +631,81 @@ export const CategoryDetailPage: React.FC = () => {
           recommendedDate={calculateRecommendedDate()}
           reviewPeriod={category.review_period}
         />
+      )}
+
+      {/* Review Modal */}
+      {showReviewModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <h3 className="text-xl font-semibold mb-4">
+              {reviewAction === 'approve' ? 'Approve Submission' : 'Reject Submission'}
+            </h3>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Review Notes {reviewAction === 'reject' && <span className="text-red-500">*</span>}
+              </label>
+              <textarea
+                value={reviewNotes}
+                onChange={(e) => setReviewNotes(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg p-3 h-32 resize-none"
+                placeholder={reviewAction === 'approve' 
+                  ? 'Add any notes about this approval (optional)...'
+                  : 'Please provide a reason for rejection (required)...'}
+              />
+            </div>
+            <div className="flex gap-3 justify-end">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowReviewModal(false);
+                  setReviewNotes('');
+                  setReviewAction(null);
+                }}
+                disabled={processingReview}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant={reviewAction === 'approve' ? 'success' : 'danger'}
+                onClick={handleReviewSubmit}
+                disabled={processingReview || (reviewAction === 'reject' && !reviewNotes.trim())}
+              >
+                {processingReview
+                  ? (reviewAction === 'approve' ? 'Approving...' : 'Rejecting...')
+                  : (reviewAction === 'approve' ? 'Approve' : 'Reject')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Approval Section - Only visible to approvers */}
+      {!isEditing && canReview && (
+        <div className="bg-white rounded-lg shadow p-6 mb-6 border-l-4 border-blue-500">
+          <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+            <AlertCircle className="text-blue-500" size={24} />
+            Pending Approval
+          </h2>
+          <p className="text-gray-600 mb-4">
+            This submission is awaiting your approval. Please review the files and either approve or reject the submission.
+          </p>
+          <div className="flex gap-3">
+            <Button
+              variant="success"
+              onClick={handleApproveClick}
+            >
+              <CheckCircle size={18} className="mr-2" />
+              Approve
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleRejectClick}
+            >
+              <XCircle size={18} className="mr-2" />
+              Reject
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* Current Submission Files */}

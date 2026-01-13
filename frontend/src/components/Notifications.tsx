@@ -52,7 +52,8 @@ export const Notifications: React.FC<NotificationsProps> = ({ userId }) => {
   const fetchNotifications = async () => {
     if (!userId) return;
     try {
-      const data = await notificationsApi.getUnread(userId);
+      // Fetch all notifications (both read and unread)
+      const data = await notificationsApi.getAll(userId);
       // Ensure data is always an array
       setNotifications(Array.isArray(data) ? data : []);
     } catch (error) {
@@ -75,7 +76,10 @@ export const Notifications: React.FC<NotificationsProps> = ({ userId }) => {
   const handleMarkRead = async (notificationId: number) => {
     try {
       await notificationsApi.markRead(notificationId);
-      setNotifications(notifications.filter(n => n.id !== notificationId));
+      // Update the notification's is_read status instead of removing it
+      setNotifications(notifications.map(n => 
+        n.id === notificationId ? { ...n, is_read: true } : n
+      ));
       setUnreadCount(Math.max(0, unreadCount - 1));
     } catch (error) {
       console.error('Error marking notification as read:', error);
@@ -87,7 +91,8 @@ export const Notifications: React.FC<NotificationsProps> = ({ userId }) => {
     if (!userId) return;
     try {
       await notificationsApi.markAllRead(userId);
-      setNotifications([]);
+      // Update all notifications to read status instead of removing them
+      setNotifications(notifications.map(n => ({ ...n, is_read: true })));
       setUnreadCount(0);
       toast.success('All notifications marked as read');
     } catch (error) {
@@ -97,7 +102,10 @@ export const Notifications: React.FC<NotificationsProps> = ({ userId }) => {
   };
 
   const handleNotificationClick = (notification: Notification) => {
-    handleMarkRead(notification.id);
+    // Only mark as read if it's not already read
+    if (!notification.is_read) {
+      handleMarkRead(notification.id);
+    }
     if (notification.category_id) {
       navigate(`/categories/${notification.category_id}`);
       setIsOpen(false);
@@ -183,7 +191,11 @@ export const Notifications: React.FC<NotificationsProps> = ({ userId }) => {
                 {Array.isArray(notifications) && notifications.map((notification) => (
                   <div
                     key={notification.id}
-                    className={`p-4 hover:bg-gray-50 cursor-pointer transition-colors border-l-4 ${getNotificationColor(notification.notification_type)}`}
+                    className={`p-4 hover:bg-gray-50 cursor-pointer transition-colors border-l-4 ${
+                      notification.is_read 
+                        ? 'bg-gray-50 border-gray-200 opacity-75' 
+                        : getNotificationColor(notification.notification_type)
+                    }`}
                     onClick={() => handleNotificationClick(notification)}
                   >
                     <div className="flex items-start gap-3">
@@ -191,26 +203,37 @@ export const Notifications: React.FC<NotificationsProps> = ({ userId }) => {
                         {getNotificationIcon(notification.notification_type)}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm text-gray-900 mb-1">
-                          {notification.title}
-                        </p>
-                        <p className="text-xs text-gray-600 mb-2">
+                        <div className="flex items-center gap-2">
+                          <p className={`font-medium text-sm mb-1 ${
+                            notification.is_read ? 'text-gray-600' : 'text-gray-900'
+                          }`}>
+                            {notification.title}
+                          </p>
+                          {!notification.is_read && (
+                            <span className="h-2 w-2 bg-blue-500 rounded-full"></span>
+                          )}
+                        </div>
+                        <p className={`text-xs mb-2 ${
+                          notification.is_read ? 'text-gray-500' : 'text-gray-600'
+                        }`}>
                           {notification.message}
                         </p>
                         <p className="text-xs text-gray-400">
                           {new Date(notification.created_at).toLocaleString()}
                         </p>
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleMarkRead(notification.id);
-                        }}
-                        className="text-gray-400 hover:text-gray-600 p-1"
-                        title="Mark as read"
-                      >
-                        <Check size={16} />
-                      </button>
+                      {!notification.is_read && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMarkRead(notification.id);
+                          }}
+                          className="text-gray-400 hover:text-gray-600 p-1"
+                          title="Mark as read"
+                        >
+                          <Check size={16} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}

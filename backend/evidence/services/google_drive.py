@@ -8,11 +8,12 @@ import json
 
 
 class GoogleDriveService:
-    def __init__(self, credentials_dict=None, access_token=None):
+    def __init__(self, credentials_dict=None, access_token=None, refresh_token=None):
         """
         Initialize Google Drive service.
         credentials_dict: Dictionary containing OAuth2 credentials
         access_token: String access token (alternative to credentials_dict)
+        refresh_token: String refresh token (optional, for token refresh)
         """
         if credentials_dict:
             # If it's just a token, create credentials from it
@@ -26,8 +27,19 @@ class GoogleDriveService:
             # Create credentials from access token string
             from google.oauth2.credentials import Credentials
             from django.conf import settings
+            # If refresh_token is provided as parameter, use it
+            # Otherwise check if access_token is a dict
+            if isinstance(access_token, dict):
+                # If access_token is actually a dict with token and refresh_token
+                actual_refresh_token = access_token.get('refresh_token') or refresh_token
+                actual_access_token = access_token.get('token') or access_token.get('access_token')
+            else:
+                actual_access_token = access_token
+                actual_refresh_token = refresh_token
+            
             credentials = Credentials(
-                token=access_token,
+                token=actual_access_token,
+                refresh_token=actual_refresh_token,
                 client_id=settings.GOOGLE_DRIVE_CLIENT_ID,
                 client_secret=settings.GOOGLE_DRIVE_CLIENT_SECRET,
                 token_uri='https://oauth2.googleapis.com/token'
