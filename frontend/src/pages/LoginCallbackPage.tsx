@@ -45,6 +45,9 @@ export const LoginCallbackPage: React.FC = () => {
           localStorage.setItem('user', JSON.stringify(data.user));
         }
         
+        // Mark Google Drive as authenticated
+        localStorage.setItem('google_drive_authenticated', 'true');
+        
         // Note: access_token is stored in session on backend, not needed in localStorage
         toast.success(data.message || 'Google Drive authentication successful!');
         

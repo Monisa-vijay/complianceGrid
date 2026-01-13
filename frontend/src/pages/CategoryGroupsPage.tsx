@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Folder, ChevronRight, Eye, EyeOff, Target, TrendingUp, Upload, AlertCircle, ChevronDown, ChevronUp, Download, FileText, FileSpreadsheet, Cloud } from 'lucide-react';
+import { Folder, ChevronRight, Eye, EyeOff, Target, TrendingUp, Upload, AlertCircle, ChevronDown, ChevronUp, Download, FileText, FileSpreadsheet, Cloud, CheckCircle } from 'lucide-react';
 import { categoriesApi, CategoryGroup } from '../api/categories';
 import { authApi } from '../api/auth';
+import apiClient from '../api/client';
 import { Button } from '../components/Button';
 import toast from 'react-hot-toast';
 
@@ -19,9 +20,30 @@ export const CategoryGroupsPage: React.FC = () => {
   });
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [creatingFolders, setCreatingFolders] = useState(false);
+  const [isGoogleAuthenticated, setIsGoogleAuthenticated] = useState(false);
+
+  // Check Google Drive authentication status from backend
+  const checkGoogleDriveAuth = async () => {
+    try {
+      const response = await apiClient.get('/auth/me/');
+      const userData = response.data;
+      if (userData && userData.google_drive_authenticated) {
+        setIsGoogleAuthenticated(true);
+        localStorage.setItem('google_drive_authenticated', 'true');
+      } else {
+        setIsGoogleAuthenticated(false);
+        localStorage.removeItem('google_drive_authenticated');
+      }
+    } catch (error) {
+      // If error, assume not authenticated
+      setIsGoogleAuthenticated(false);
+      localStorage.removeItem('google_drive_authenticated');
+    }
+  };
 
   useEffect(() => {
     fetchGroups();
+    checkGoogleDriveAuth();
   }, [showHidden]);
 
   const fetchGroups = async () => {
@@ -63,6 +85,7 @@ export const CategoryGroupsPage: React.FC = () => {
     }
   };
 
+
   const handleCreateGoogleDriveFolders = async () => {
     // Prevent multiple simultaneous requests
     if (creatingFolders) {
@@ -71,9 +94,11 @@ export const CategoryGroupsPage: React.FC = () => {
 
     setCreatingFolders(true);
     try {
-      toast.loading('Creating Google Drive folder structure...', { id: 'create-folders' });
+      toast.loading('Syncing Google Drive folder structure...', { id: 'create-folders' });
       const result = await categoriesApi.createGoogleDriveFolders();
-      toast.success(result.message || 'Folder structure created successfully!', { id: 'create-folders' });
+      toast.success(result.message || 'Folder structure synced successfully!', { id: 'create-folders' });
+      // Refresh authentication status after successful sync
+      await checkGoogleDriveAuth();
     } catch (error: any) {
       console.error('Error creating folders:', error);
       
@@ -221,20 +246,27 @@ export const CategoryGroupsPage: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-4">
-          <Button
-            variant="secondary"
-            onClick={handleAuthenticateGoogle}
-          >
-            <Cloud size={18} className="mr-2" />
-            Authenticate Google Drive
-          </Button>
+          {!isGoogleAuthenticated && (
+            <Button
+              variant="secondary"
+              onClick={handleAuthenticateGoogle}
+            >
+              <Cloud size={18} className="mr-2" />
+              Authenticate
+            </Button>
+          )}
+          {isGoogleAuthenticated && (
+            <div className="flex items-center text-green-600" title="Google Drive authenticated">
+              <CheckCircle size={20} />
+            </div>
+          )}
           <Button
             variant="primary"
             onClick={handleCreateGoogleDriveFolders}
             disabled={creatingFolders}
           >
             <Cloud size={18} className="mr-2" />
-            {creatingFolders ? 'Creating...' : 'Create Google Drive Folders'}
+            {creatingFolders ? 'Syncing...' : 'Sync'}
           </Button>
           <div className="relative">
             <Button
