@@ -176,11 +176,16 @@ CORS_ALLOW_HEADERS = [
 ]
 
 # CSRF settings - allow requests from frontend
+# Include both with and without trailing slashes to handle all cases
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
+    "http://localhost:3000/",
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:3000/",
     "http://localhost:8000",
+    "http://localhost:8000/",
     "http://127.0.0.1:8000",
+    "http://127.0.0.1:8000/",
 ]
 
 # CSRF cookie settings
@@ -197,8 +202,8 @@ EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@compliancegrid.com')
 
 # Google Drive API settings
-GOOGLE_DRIVE_CLIENT_ID = os.environ.get('GOOGLE_DRIVE_CLIENT_ID', '')
-GOOGLE_DRIVE_CLIENT_SECRET = os.environ.get('GOOGLE_DRIVE_CLIENT_SECRET', '')
+GOOGLE_DRIVE_CLIENT_ID = os.environ.get('GOOGLE_DRIVE_CLIENT_ID', '1074048886618-5dfqnmghrdk3gkpq2kj97aeck9cfspb7.apps.googleusercontent.com')
+GOOGLE_DRIVE_CLIENT_SECRET = os.environ.get('GOOGLE_DRIVE_CLIENT_SECRET', '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')
 GOOGLE_DRIVE_REDIRECT_URI = os.environ.get('GOOGLE_DRIVE_REDIRECT_URI', 'http://localhost:3000/login/callback')
 GOOGLE_DRIVE_SCOPES = ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/drive.file']
 

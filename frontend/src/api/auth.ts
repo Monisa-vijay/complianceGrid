@@ -54,5 +54,10 @@ export const authApi = {
     const response = await apiClient.patch('/auth/update-profile/', data);
     return response.data.user;
   },
+
+  getGoogleAuthUrl: async (): Promise<{ authorization_url: string }> => {
+    const response = await apiClient.get('/auth/google/initiate/');
+    return response.data;
+  },
 };
 

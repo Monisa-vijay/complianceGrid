@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Folder, ChevronRight, Eye, EyeOff, Target, TrendingUp, Upload, AlertCircle, ChevronDown, ChevronUp, Download, FileText, FileSpreadsheet } from 'lucide-react';
+import { Folder, ChevronRight, Eye, EyeOff, Target, TrendingUp, Upload, AlertCircle, ChevronDown, ChevronUp, Download, FileText, FileSpreadsheet, Cloud, CheckCircle } from 'lucide-react';
 import { categoriesApi, CategoryGroup } from '../api/categories';
+import { authApi } from '../api/auth';
+import apiClient from '../api/client';
 import { Button } from '../components/Button';
 import toast from 'react-hot-toast';
 
@@ -17,9 +19,31 @@ export const CategoryGroupsPage: React.FC = () => {
     commonCriteria: true,
   });
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [creatingFolders, setCreatingFolders] = useState(false);
+  const [isGoogleAuthenticated, setIsGoogleAuthenticated] = useState(false);
+
+  // Check Google Drive authentication status from backend
+  const checkGoogleDriveAuth = async () => {
+    try {
+      const response = await apiClient.get('/auth/me/');
+      const userData = response.data;
+      if (userData && userData.google_drive_authenticated) {
+        setIsGoogleAuthenticated(true);
+        localStorage.setItem('google_drive_authenticated', 'true');
+      } else {
+        setIsGoogleAuthenticated(false);
+        localStorage.removeItem('google_drive_authenticated');
+      }
+    } catch (error) {
+      // If error, assume not authenticated
+      setIsGoogleAuthenticated(false);
+      localStorage.removeItem('google_drive_authenticated');
+    }
+  };
 
   useEffect(() => {
     fetchGroups();
+    checkGoogleDriveAuth();
   }, [showHidden]);
 
   const fetchGroups = async () => {
@@ -46,6 +70,54 @@ export const CategoryGroupsPage: React.FC = () => {
       ...prev,
       [section]: !prev[section]
     }));
+  };
+
+  const handleAuthenticateGoogle = async () => {
+    try {
+      const { authorization_url } = await authApi.getGoogleAuthUrl();
+      // Store redirect location to return after auth
+      sessionStorage.setItem('oauth_redirect', window.location.pathname);
+      // Redirect to Google OAuth
+      window.location.href = authorization_url;
+    } catch (error: any) {
+      console.error('Error initiating Google auth:', error);
+      toast.error('Failed to initiate Google authentication');
+    }
+  };
+
+
+  const handleCreateGoogleDriveFolders = async () => {
+    // Prevent multiple simultaneous requests
+    if (creatingFolders) {
+      return;
+    }
+
+    setCreatingFolders(true);
+    try {
+      toast.loading('Syncing Google Drive folder structure...', { id: 'create-folders' });
+      const result = await categoriesApi.createGoogleDriveFolders();
+      toast.success(result.message || 'Folder structure synced successfully!', { id: 'create-folders' });
+      // Refresh authentication status after successful sync
+      await checkGoogleDriveAuth();
+    } catch (error: any) {
+      console.error('Error creating folders:', error);
+      
+      // Handle specific error cases
+      let errorMessage = error.response?.data?.error || error.response?.data?.detail || error.message || 'Failed to create folder structure';
+      
+      // If CSRF error, suggest refreshing the page
+      if (errorMessage.toLowerCase().includes('csrf')) {
+        errorMessage = 'CSRF token error. Please refresh the page (F5) and try again.';
+      }
+      // If Google auth required, provide helpful message
+      else if (errorMessage.toLowerCase().includes('google') || errorMessage.toLowerCase().includes('authentication')) {
+        errorMessage = 'Google Drive authentication required. Please click "Authenticate Google Drive" first.';
+      }
+      
+      toast.error(errorMessage, { id: 'create-folders', duration: 5000 });
+    } finally {
+      setCreatingFolders(false);
+    }
   };
 
   const handleExport = async (format: 'pdf' | 'excel') => {
@@ -174,6 +246,28 @@ export const CategoryGroupsPage: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-4">
+          {!isGoogleAuthenticated && (
+            <Button
+              variant="secondary"
+              onClick={handleAuthenticateGoogle}
+            >
+              <Cloud size={18} className="mr-2" />
+              Authenticate
+            </Button>
+          )}
+          {isGoogleAuthenticated && (
+            <div className="flex items-center text-green-600" title="Google Drive authenticated">
+              <CheckCircle size={20} />
+            </div>
+          )}
+          <Button
+            variant="primary"
+            onClick={handleCreateGoogleDriveFolders}
+            disabled={creatingFolders}
+          >
+            <Cloud size={18} className="mr-2" />
+            {creatingFolders ? 'Syncing...' : 'Sync'}
+          </Button>
           <div className="relative">
             <Button
               variant="primary"

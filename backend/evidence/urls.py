@@ -1,9 +1,10 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import EvidenceCategoryViewSet, EvidenceSubmissionViewSet, GoogleAuthView, AuthView, EvidenceFileViewSet, NotificationViewSet, LoginView
+from .views import EvidenceCategoryViewSet, EvidenceSubmissionViewSet, GoogleAuthView, GoogleOAuthCallbackView, AuthView, EvidenceFileViewSet, NotificationViewSet, LoginView
 
 urlpatterns = [
     path('auth/login/', LoginView.as_view(), name='login'),  # CSRF-exempt login endpoint - must come before router
+    path('auth/google/callback/', GoogleOAuthCallbackView.as_view(), name='google-oauth-callback'),  # CSRF-exempt OAuth callback
 ]
 
 router = DefaultRouter()

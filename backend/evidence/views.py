@@ -18,7 +18,8 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from .models import (
     EvidenceCategory, EvidenceSubmission, EvidenceFile,
-    SubmissionComment, EvidenceStatus, CategoryGroup, Notification
+    SubmissionComment, EvidenceStatus, CategoryGroup, Notification,
+    GoogleDriveFolderMapping
 )
 from .serializers import (
     EvidenceCategorySerializer, EvidenceCategoryDetailSerializer,
@@ -30,6 +31,8 @@ from .services.google_drive import GoogleDriveService
 from django.contrib.auth.models import User
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from django.conf import settings
+import requests
 
 
 class EvidenceCategoryViewSet(viewsets.ModelViewSet):
@@ -218,6 +221,146 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
                 })
         
         return Response(groups)
+    
+    @action(detail=False, methods=['post'], url_path='create-google-drive-folders')
+    def create_google_drive_folders(self, request):
+        """Create folder structure in Google Drive for category groups"""
+        # Check if user has Google access token in session
+        access_token = request.session.get('google_access_token')
+        if not access_token:
+            return Response(
+                {'error': 'Google Drive authentication required. Please authenticate with Google first.'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        try:
+            # Initialize Google Drive service
+            drive_service = GoogleDriveService(access_token=access_token)
+            
+            # Define folder structure mapping
+            # Parent categories and their subcategories
+            folder_structure = {
+                'Security (CC6)': [
+                    'ACCESS_CONTROLS',
+                    'NETWORK_SECURITY',
+                    'PHYSICAL_SECURITY',
+                    'DATA_PROTECTION',
+                    'ENDPOINT_SECURITY',
+                    'MONITORING_INCIDENT'
+                ],
+                'Availability (CC7)': [
+                    'INFRASTRUCTURE_CAPACITY',
+                    'BACKUP_RECOVERY',
+                    'BUSINESS_CONTINUITY'
+                ],
+                'Confidentiality (CC8)': [
+                    'CONFIDENTIALITY'
+                ],
+                'Common Criteria (CC1-CC5)': [
+                    'CONTROL_ENVIRONMENT',
+                    'COMMUNICATION_INFO',
+                    'RISK_ASSESSMENT',
+                    'MONITORING',
+                    'HR_TRAINING',
+                    'CHANGE_MANAGEMENT',
+                    'VENDOR_MANAGEMENT'
+                ]
+            }
+            
+            # Get or create folder mapping record
+            folder_mapping, created = GoogleDriveFolderMapping.objects.get_or_create(
+                id=1  # Single global mapping
+            )
+            
+            # Create root folder
+            if not folder_mapping.root_folder_id:
+                root_folder_id = drive_service.create_folder('complianceGrid')
+                folder_mapping.root_folder_id = root_folder_id
+            else:
+                root_folder_id = folder_mapping.root_folder_id
+            
+            category_group_folder_ids = folder_mapping.category_group_folder_ids or {}
+            
+            # Create parent category folders and their subcategory folders
+            parent_folder_map = {
+                'Security (CC6)': 'security_folder_id',
+                'Availability (CC7)': 'availability_folder_id',
+                'Confidentiality (CC8)': 'confidentiality_folder_id',
+                'Common Criteria (CC1-CC5)': 'common_criteria_folder_id'
+            }
+            
+            for parent_name, group_codes in folder_structure.items():
+                # Get or create parent folder
+                parent_field = parent_folder_map[parent_name]
+                parent_folder_id = getattr(folder_mapping, parent_field)
+                
+                if not parent_folder_id:
+                    parent_folder_id = drive_service.create_folder(parent_name, parent_folder_id=root_folder_id)
+                    setattr(folder_mapping, parent_field, parent_folder_id)
+                
+                # Create subcategory folders (category group folders)
+                for group_code in group_codes:
+                    if group_code not in category_group_folder_ids:
+                        # Get the label for this group
+                        group_label = dict(CategoryGroup.choices).get(group_code, group_code)
+                        subfolder_id = drive_service.create_folder(group_label, parent_folder_id=parent_folder_id)
+                        category_group_folder_ids[group_code] = subfolder_id
+            
+            # Save folder mapping
+            folder_mapping.category_group_folder_ids = category_group_folder_ids
+            folder_mapping.save()
+            
+            # Step 2: Create folders for each EvidenceCategory (control) inside their category group folders
+            categories_created = 0
+            categories_skipped = 0
+            for group_code, group_folder_id in category_group_folder_ids.items():
+                # Get all categories for this group
+                categories = EvidenceCategory.objects.filter(
+                    category_group=group_code,
+                    is_active=True
+                )
+                
+                for category in categories:
+                    # Skip if folder already exists
+                    if category.google_drive_folder_id:
+                        categories_skipped += 1
+                        continue
+                    
+                    # Create folder for this category (control)
+                    try:
+                        category_folder_id = drive_service.create_folder(
+                            category.name,
+                            parent_folder_id=group_folder_id
+                        )
+                        # Store folder ID in category
+                        category.google_drive_folder_id = category_folder_id
+                        category.save()
+                        categories_created += 1
+                    except Exception as e:
+                        # Log error but continue with other categories
+                        print(f"Error creating folder for category {category.name}: {str(e)}")
+                        continue
+            
+            return Response({
+                'message': 'Folder structure created successfully',
+                'root_folder_id': root_folder_id,
+                'categories_created': categories_created,
+                'categories_skipped': categories_skipped,
+                'folder_mapping': {
+                    'security_folder_id': folder_mapping.security_folder_id,
+                    'availability_folder_id': folder_mapping.availability_folder_id,
+                    'confidentiality_folder_id': folder_mapping.confidentiality_folder_id,
+                    'common_criteria_folder_id': folder_mapping.common_criteria_folder_id,
+                    'category_group_folder_ids': category_group_folder_ids
+                }
+            })
+            
+        except Exception as e:
+            import traceback
+            return Response(
+                {'error': f'Failed to create folder structure: {str(e)}', 'traceback': traceback.format_exc()},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     @action(detail=False, methods=['get'], url_path='users')
     def get_users(self, request):
@@ -555,11 +698,25 @@ class EvidenceSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
         notes = request.data.get('notes', '')
         due_date_str = request.data.get('due_date')
         
-        # Save files locally
+        # Save files locally and to Google Drive
         try:
             category = submission.category
             uploaded_files = []
+            
+            # Get Google Drive access token from session
+            access_token = request.session.get('google_access_token')
+            drive_service = None
+            if access_token and category.google_drive_folder_id:
+                try:
+                    drive_service = GoogleDriveService(access_token=access_token)
+                except Exception as e:
+                    print(f"Warning: Could not initialize Google Drive service: {str(e)}")
+            
             for file in files:
+                # Read file content for Google Drive upload
+                file_content = file.read()
+                file.seek(0)  # Reset file pointer for local save
+                
                 # Create EvidenceFile record with local file storage
                 evidence_file = EvidenceFile.objects.create(
                     submission=submission,
@@ -569,6 +726,24 @@ class EvidenceSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
                     mime_type=file.content_type or 'application/octet-stream',
                     uploaded_by=request.user if request.user.is_authenticated else None
                 )
+                
+                # Upload to Google Drive if folder ID exists and service is available
+                if drive_service and category.google_drive_folder_id:
+                    try:
+                        drive_result = drive_service.upload_file(
+                            file_content=file_content,
+                            filename=file.name,
+                            folder_id=category.google_drive_folder_id,
+                            mime_type=file.content_type or 'application/octet-stream'
+                        )
+                        # Store Google Drive file info
+                        evidence_file.google_drive_file_id = drive_result['file_id']
+                        evidence_file.google_drive_file_url = drive_result['web_url']
+                        evidence_file.save()
+                    except Exception as e:
+                        # Log error but don't fail the upload - file is saved locally
+                        print(f"Warning: Could not upload {file.name} to Google Drive: {str(e)}")
+                
                 uploaded_files.append(evidence_file)
             
             # Update submission
@@ -882,6 +1057,9 @@ class AuthView(viewsets.ViewSet):
         print(f"DEBUG: /auth/me/ called - session_key: {session_key}, auth_user_id in session: {auth_user_id}, user: {request.user}, authenticated: {request.user.is_authenticated}")
         print(f"DEBUG: Cookies in request: {request.COOKIES}")
         
+        # Check Google Drive authentication status
+        google_drive_authenticated = bool(request.session.get('google_access_token'))
+        
         # If we have auth_user_id in session but user is not authenticated, try to get user manually
         if not request.user.is_authenticated and auth_user_id:
             from django.contrib.auth.models import User
@@ -889,15 +1067,24 @@ class AuthView(viewsets.ViewSet):
                 user = User.objects.get(pk=auth_user_id)
                 print(f"DEBUG: Found user from session auth_user_id: {user.username}")
                 serializer = UserSerializer(user)
-                return Response({'user': serializer.data})
+                return Response({
+                    'user': serializer.data,
+                    'google_drive_authenticated': google_drive_authenticated
+                })
             except User.DoesNotExist:
                 print(f"DEBUG: User with id {auth_user_id} does not exist")
         
         if request.user.is_authenticated:
             serializer = UserSerializer(request.user)
-            return Response({'user': serializer.data})
+            return Response({
+                'user': serializer.data,
+                'google_drive_authenticated': google_drive_authenticated
+            })
         else:
-            return Response({'user': None}, status=status.HTTP_200_OK)
+            return Response({
+                'user': None,
+                'google_drive_authenticated': False
+            }, status=status.HTTP_200_OK)
     
     @action(detail=False, methods=['get'])
     def csrf(self, request):
@@ -1063,8 +1250,39 @@ class GoogleAuthView(viewsets.ViewSet):
             'message': 'Authentication successful'
         })
     
-    @action(detail=False, methods=['post'], url_path='callback')
-    def callback(self, request):
+    @action(detail=False, methods=['get'])
+    def initiate(self, request):
+        """Get Google OAuth authorization URL"""
+        from django.conf import settings
+        from urllib.parse import urlencode
+        
+        # Build authorization URL
+        params = {
+            'client_id': settings.GOOGLE_DRIVE_CLIENT_ID,
+            'redirect_uri': settings.GOOGLE_DRIVE_REDIRECT_URI,
+            'response_type': 'code',
+            'scope': ' '.join(settings.GOOGLE_DRIVE_SCOPES),
+            'access_type': 'offline',
+            'prompt': 'consent',
+        }
+        
+        auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+        
+        return Response({
+            'authorization_url': auth_url
+        })
+
+
+class GoogleOAuthCallbackView(APIView):
+    """Handle Google OAuth callback - CSRF exempt"""
+    authentication_classes = []
+    permission_classes = []
+    
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def post(self, request):
         """Handle Google OAuth callback - exchange code for token"""
         from django.contrib.auth.models import User
         from django.contrib.auth import login
@@ -1080,14 +1298,14 @@ class GoogleAuthView(viewsets.ViewSet):
         
         try:
             # Exchange code for token
-            redirect_uri = request.build_absolute_uri('/api/auth/google/callback/')
+            # Use the redirect_uri from settings (must match the one used in authorization request)
             token_url = 'https://oauth2.googleapis.com/token'
             
             token_data = {
                 'code': code,
                 'client_id': settings.GOOGLE_DRIVE_CLIENT_ID,
                 'client_secret': settings.GOOGLE_DRIVE_CLIENT_SECRET,
-                'redirect_uri': redirect_uri,
+                'redirect_uri': settings.GOOGLE_DRIVE_REDIRECT_URI,  # Must match the redirect_uri used in authorization
                 'grant_type': 'authorization_code',
             }
             
@@ -1142,20 +1360,44 @@ class GoogleAuthView(viewsets.ViewSet):
             if refresh_token:
                 request.session['google_refresh_token'] = refresh_token
             request.session['google_user_info'] = user_info
+            request.session.modified = True  # Ensure session is saved
             
-            # Login user
-            login(request, user)
+            # If user is not already logged in, log them in
+            # Otherwise, just store the token for the existing session
+            if not request.user.is_authenticated:
+                login(request, user)
             
-            return Response({
+            # Return current user (either newly logged in or existing)
+            current_user = request.user if request.user.is_authenticated else user
+            
+            # Set CSRF token in response for subsequent requests
+            from django.middleware.csrf import get_token
+            csrf_token = get_token(request)
+            
+            response = Response({
                 'user': {
-                    'id': user.id,
-                    'username': user.username,
-                    'email': user.email,
-                    'name': user.get_full_name() or user.username,
+                    'id': current_user.id,
+                    'username': current_user.username,
+                    'email': current_user.email,
+                    'name': current_user.get_full_name() or current_user.username,
                 },
                 'access_token': access_token,
-                'message': 'Authentication successful'
+                'message': 'Google Drive authentication successful'
             })
+            
+            # Ensure CSRF cookie is set for subsequent requests
+            response.set_cookie(
+                'csrftoken',
+                csrf_token,
+                max_age=60 * 60 * 24 * 7,  # 7 days
+                httponly=False,
+                samesite='Lax',
+                secure=False,
+                path='/',
+                domain=None  # Allow cookie for localhost
+            )
+            
+            return response
             
         except Exception as e:
             return Response(

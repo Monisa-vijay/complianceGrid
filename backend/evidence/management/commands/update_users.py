@@ -10,6 +10,12 @@ class Command(BaseCommand):
         # Define the users to keep/update
         users_to_keep = [
             {
+                'username': 'sakthi',
+                'email': 'sakthi@dataterrain.com',
+                'first_name': 'Sakthi',
+                'last_name': 'C'
+            },
+            {
                 'username': 'monisa',
                 'email': 'monisa@dataterrain.com',
                 'first_name': 'Monisa',

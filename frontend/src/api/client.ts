@@ -61,15 +61,19 @@ apiClient.interceptors.request.use(
     const isCsrfEndpoint = config.url?.includes('/auth/csrf/');
     
     if (isStateChanging && !isLogin && !isCsrfEndpoint) {
+      // Always try to get token from cookie first
       let csrfToken = getCsrfToken();
       
-      // Only fetch if we don't have a token (avoid endless requests)
+      // If no token, fetch one
       if (!csrfToken && !csrfTokenFetching) {
         csrfToken = await fetchCsrfToken();
       }
       
+      // Set the token in the header (Axios will handle the header name case)
       if (csrfToken) {
         config.headers['X-CSRFToken'] = csrfToken;
+      } else {
+        console.warn('⚠️ No CSRF token available for request:', config.url);
       }
     }
     
@@ -83,7 +87,8 @@ apiClient.interceptors.request.use(
 );
 
 // Track retry attempts to prevent infinite loops
-const retryAttempts = new WeakMap();
+// Use a Map with string keys since WeakMap might not work reliably with request configs
+const retryAttempts = new Map<string, number>();
 
 // Response interceptor for handling errors
 apiClient.interceptors.response.use(
@@ -99,28 +104,58 @@ apiClient.interceptors.response.use(
     } else if (error.response?.status === 403) {
       // CSRF error - try to get a fresh token and retry (only once)
       const originalRequest = error.config;
-      const retryCount = retryAttempts.get(originalRequest) || 0;
+      
+      if (!originalRequest) {
+        return Promise.reject(error);
+      }
+      
+      // Check if this request has already been retried using a string key
+      const requestKey = `${originalRequest.method}_${originalRequest.url}`;
+      const retryCount = retryAttempts.get(requestKey) || 0;
       
       // Only retry once to prevent infinite loops
       // Only retry if it's actually a CSRF error (not just any 403)
-      if (retryCount < 1 && originalRequest && !originalRequest.url?.includes('/auth/login/')) {
-        const csrfError = error.response?.data?.detail || error.response?.data?.error || '';
-        const isCsrfError = csrfError.toLowerCase().includes('csrf') || 
-                           csrfError.toLowerCase().includes('origin checking failed');
+      if (retryCount < 1 && !originalRequest.url?.includes('/auth/login/')) {
+        const errorMessage = error.response?.data?.detail || error.response?.data?.error || '';
+        const errorText = errorMessage.toLowerCase();
         
-        if (isCsrfError) {
-          console.warn('CSRF error detected, fetching new token...');
+        // Only retry if it's definitely a CSRF error
+        // Django CSRF errors typically mention "CSRF" or "origin checking failed"
+        const isDefinitelyCsrfError = errorText.includes('csrf') || 
+                                      errorText.includes('origin checking failed') ||
+                                      errorText.includes('csrf token missing') ||
+                                      errorText.includes('csrf verification failed');
+        
+        if (isDefinitelyCsrfError) {
+          console.warn('CSRF error detected, fetching new token and retrying once...');
           try {
+            // Mark this request as retried BEFORE making the retry
+            retryAttempts.set(requestKey, retryCount + 1);
+            
             // Fetch new CSRF token
             const csrfToken = await fetchCsrfToken();
             if (csrfToken) {
-              retryAttempts.set(originalRequest, retryCount + 1);
               originalRequest.headers['X-CSRFToken'] = csrfToken;
               return apiClient(originalRequest);
+            } else {
+              // Remove the retry mark if we couldn't get a token
+              retryAttempts.delete(requestKey);
             }
           } catch (csrfError) {
             console.error('Failed to refresh CSRF token:', csrfError);
+            // Remove the retry mark on error
+            retryAttempts.delete(requestKey);
           }
+        } else {
+          // Not a CSRF error - don't retry, just reject
+          console.warn('403 error but not a CSRF error, not retrying. Error:', errorMessage);
+        }
+      } else {
+        // Already retried or not eligible for retry
+        if (retryCount >= 1) {
+          console.warn('Request already retried once, not retrying again');
+          // Clean up the retry tracking after a delay
+          setTimeout(() => retryAttempts.delete(requestKey), 5000);
         }
       }
     }

@@ -190,6 +190,21 @@ export const categoriesApi = {
     return response.data;
   },
 
+  createGoogleDriveFolders: async (): Promise<{
+    message: string;
+    root_folder_id: string;
+    folder_mapping: {
+      security_folder_id: string;
+      availability_folder_id: string;
+      confidentiality_folder_id: string;
+      common_criteria_folder_id: string;
+      category_group_folder_ids: Record<string, string>;
+    };
+  }> => {
+    const response = await apiClient.post('/categories/create-google-drive-folders/');
+    return response.data;
+  },
+
   exportGroups: async (format: 'pdf' | 'excel', showHidden: boolean = false): Promise<Blob> => {
     const params: any = {
       format: format,

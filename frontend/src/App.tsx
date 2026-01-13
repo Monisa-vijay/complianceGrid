@@ -13,9 +13,7 @@ import { Notifications } from './components/Notifications';
 import { Profile } from './components/Profile';
 import { Button } from './components/Button';
 import { authApi } from './api/auth';
-// Login temporarily disabled
-// import { LoginPage } from './pages/LoginPage';
-// import { LoginCallbackPage } from './pages/LoginCallbackPage';
+import { LoginCallbackPage } from './pages/LoginCallbackPage';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navigate = useNavigate();
@@ -128,13 +126,14 @@ function AppContent() {
     }
   };
 
-  const isLoginPage = location.pathname === '/login';
+  const isLoginPage = location.pathname === '/login' || location.pathname === '/login/callback';
 
   if (isLoginPage) {
     return (
       <>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/login/callback" element={<LoginCallbackPage />} />
         </Routes>
         <Toaster position="top-right" />
       </>

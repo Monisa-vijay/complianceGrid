@@ -278,3 +278,27 @@ class Notification(models.Model):
     def __str__(self):
         return f"{self.title} - {self.user.username}"
 
+
+class GoogleDriveFolderMapping(models.Model):
+    """Store Google Drive folder IDs for category group structure"""
+    # Root folder
+    root_folder_id = models.CharField(max_length=255, blank=True, null=True)
+    
+    # Parent category folders
+    security_folder_id = models.CharField(max_length=255, blank=True, null=True)  # Security (CC6)
+    availability_folder_id = models.CharField(max_length=255, blank=True, null=True)  # Availability (CC7)
+    confidentiality_folder_id = models.CharField(max_length=255, blank=True, null=True)  # Confidentiality (CC8)
+    common_criteria_folder_id = models.CharField(max_length=255, blank=True, null=True)  # Common Criteria (CC1-CC5)
+    
+    # Category group folders - using JSON field to store mapping
+    category_group_folder_ids = models.JSONField(default=dict, blank=True)  # {group_code: folder_id}
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Google Drive Folder Mapping"
+        verbose_name_plural = "Google Drive Folder Mappings"
+    
+    def __str__(self):
+        return f"Google Drive Folder Structure - {self.updated_at}"
