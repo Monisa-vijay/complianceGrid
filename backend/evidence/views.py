@@ -1329,7 +1329,7 @@ class AuthView(viewsets.ViewSet):
         )
         return response
     
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], authentication_classes=[SessionAuthentication])
     def change_password(self, request):
         """Change user password"""
         from django.contrib.auth import update_session_auth_hash
@@ -1372,7 +1372,7 @@ class AuthView(viewsets.ViewSet):
         
         return Response({'message': 'Password changed successfully'})
     
-    @action(detail=False, methods=['patch'])
+    @action(detail=False, methods=['patch'], authentication_classes=[SessionAuthentication])
     def update_profile(self, request):
         """Update user profile information"""
         if not request.user.is_authenticated:

@@ -136,12 +136,46 @@ class Command(BaseCommand):
                             }
                         )
                         
-                        if created:
-                            created_count += 1
-                            self.stdout.write(self.style.SUCCESS(f'Row {row_num}: Created - {category.name}'))
+                        # Update assignee if provided
+                        if assigned_str and assigned_str.strip():
+                            assigned_name = assigned_str.strip()
+                            # Try to find user by first name, last name, or username
+                            assigned_user = None
+                            
+                            # Try exact username match first
+                            try:
+                                assigned_user = User.objects.get(username__iexact=assigned_name.lower().replace(' ', '_'))
+                            except User.DoesNotExist:
+                                # Try first name match
+                                try:
+                                    assigned_user = User.objects.get(first_name__iexact=assigned_name)
+                                except (User.DoesNotExist, User.MultipleObjectsReturned):
+                                    # Try partial match on first name
+                                    users = User.objects.filter(first_name__icontains=assigned_name.split()[0] if assigned_name.split() else assigned_name)
+                                    if users.count() == 1:
+                                        assigned_user = users.first()
+                            
+                            if assigned_user:
+                                category.assignee = assigned_user
+                                category.save()
+                                if created:
+                                    self.stdout.write(self.style.SUCCESS(f'Row {row_num}: Created - {category.name} (Assigned to {assigned_user.username})'))
+                                else:
+                                    self.stdout.write(self.style.SUCCESS(f'Row {row_num}: Updated - {category.name} (Assigned to {assigned_user.username})'))
+                            else:
+                                if created:
+                                    created_count += 1
+                                    self.stdout.write(self.style.SUCCESS(f'Row {row_num}: Created - {category.name} (Assignee "{assigned_name}" not found)'))
+                                else:
+                                    updated_count += 1
+                                    self.stdout.write(self.style.WARNING(f'Row {row_num}: Already exists - {category.name} (Assignee "{assigned_name}" not found)'))
                         else:
-                            updated_count += 1
-                            self.stdout.write(self.style.WARNING(f'Row {row_num}: Already exists - {category.name}'))
+                            if created:
+                                created_count += 1
+                                self.stdout.write(self.style.SUCCESS(f'Row {row_num}: Created - {category.name}'))
+                            else:
+                                updated_count += 1
+                                self.stdout.write(self.style.WARNING(f'Row {row_num}: Already exists - {category.name}'))
                             
                     except Exception as e:
                         error_count += 1

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Folder, ChevronRight, Eye, EyeOff, Target, TrendingUp, Upload, AlertCircle, ChevronDown, ChevronUp, Download, FileText, FileSpreadsheet, Cloud, CheckCircle } from 'lucide-react';
+import { Folder, ChevronRight, Target, TrendingUp, Upload, AlertCircle, ChevronDown, ChevronUp, Download, FileText, FileSpreadsheet, Cloud, CheckCircle } from 'lucide-react';
 import { categoriesApi, CategoryGroup } from '../api/categories';
 import { authApi } from '../api/auth';
 import apiClient from '../api/client';
@@ -11,7 +11,6 @@ export const CategoryGroupsPage: React.FC = () => {
   const navigate = useNavigate();
   const [groups, setGroups] = useState<CategoryGroup[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showHidden, setShowHidden] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     security: true,
     availability: true,
@@ -44,12 +43,12 @@ export const CategoryGroupsPage: React.FC = () => {
   useEffect(() => {
     fetchGroups();
     checkGoogleDriveAuth();
-  }, [showHidden]);
+  }, []);
 
   const fetchGroups = async () => {
     try {
       setLoading(true);
-      const data = await categoriesApi.getGroups(showHidden);
+      const data = await categoriesApi.getGroups(false);
       // Filter out uncategorized and groups with 0 count
       const filtered = data.filter(g => g.code !== 'UNCATEGORIZED' && g.count > 0);
       setGroups(filtered);
@@ -150,7 +149,7 @@ export const CategoryGroupsPage: React.FC = () => {
   const handleExport = async (format: 'pdf' | 'excel') => {
     try {
       toast.loading(`Exporting as ${format.toUpperCase()}...`, { id: 'export' });
-      const blob = await categoriesApi.exportGroups(format, showHidden);
+      const blob = await categoriesApi.exportGroups(format, false);
       
       // Check if the response is actually an error (JSON error response)
       if (blob.type === 'application/json') {
@@ -334,20 +333,6 @@ export const CategoryGroupsPage: React.FC = () => {
               </>
             )}
           </div>
-          <button
-            onClick={() => setShowHidden(!showHidden)}
-            className={`flex items-center gap-2 px-4 py-2.5 border rounded-lg transition-all font-medium ${
-              showHidden
-                ? 'bg-gray-800 text-white border-gray-800 hover:bg-gray-700'
-                : 'border-gray-300 hover:bg-gray-50 hover:border-gray-400'
-            }`}
-          >
-            {showHidden ? <EyeOff size={18} /> : <Eye size={18} />}
-            <span className="text-sm">{showHidden ? 'Show Active' : 'Show Hidden'}</span>
-          </button>
-          <Button variant="primary" onClick={() => navigate('/categories')}>
-            View All Controls
-          </Button>
         </div>
       </div>
 

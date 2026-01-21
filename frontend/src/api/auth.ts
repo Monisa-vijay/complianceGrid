@@ -51,7 +51,7 @@ export const authApi = {
   },
 
   updateProfile: async (data: { first_name?: string; last_name?: string; email?: string }): Promise<User> => {
-    const response = await apiClient.patch('/auth/update-profile/', data);
+    const response = await apiClient.patch('/auth/update_profile/', data);
     return response.data.user;
   },
 
