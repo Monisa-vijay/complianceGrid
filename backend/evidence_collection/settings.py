@@ -40,6 +40,9 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+# Ensure trailing slashes are appended for API endpoints
+APPEND_SLASH = True
+
 # Ensure CSRF cookie is set
 CSRF_COOKIE_NAME = 'csrftoken'
 CSRF_COOKIE_HTTPONLY = False  # Allow JavaScript to read it

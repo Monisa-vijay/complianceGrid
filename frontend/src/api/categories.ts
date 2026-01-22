@@ -242,18 +242,25 @@ export const categoriesApi = {
     } catch (error: any) {
       // Handle axios errors
       if (error.response && error.response.data instanceof Blob) {
-        try {
-          const text = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
+          try {
+            const text = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
             reader.onerror = reject;
-            reader.readAsText(error.response.data);
-          });
-          const errorData = JSON.parse(text);
+              reader.readAsText(error.response.data);
+            });
+            const errorData = JSON.parse(text);
           throw new Error(errorData.error || 'Failed to export data');
         } catch {
           throw new Error('Failed to export data');
         }
+      }
+      // Network errors or other issues
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        throw new Error('Request timeout. Please try again.');
+      }
+      if (error.code === 'ERR_NETWORK' || !error.response) {
+        throw new Error(`Network error: ${error.message || 'Unable to connect to server'}`);
       }
       throw error;
     }

@@ -172,7 +172,7 @@ export const CategoryGroupsPage: React.FC = () => {
       toast.success(`Exported successfully as ${format.toUpperCase()}`, { id: 'export' });
     } catch (error: any) {
       console.error('Error exporting:', error);
-      const errorMessage = error.response?.data?.error || error.message || 'Failed to export data';
+      const errorMessage = error.response?.data?.error || error.response?.data?.detail || error.message || 'Failed to export data';
       toast.error(errorMessage, { id: 'export' });
     }
   };

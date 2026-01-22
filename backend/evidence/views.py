@@ -488,13 +488,12 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
         serializer = UserSerializer(users, many=True)
         return Response(serializer.data)
     
-    @action(detail=False, methods=['get'], url_path='export')
+    @action(detail=False, methods=['get'], url_path='export', url_name='export')
     def export_groups(self, request):
         """Export category groups data in PDF or Excel format"""
         try:
             format_type = request.query_params.get('format', 'excel').lower()
-            show_hidden = request.query_params.get('show_hidden', 'false') == 'true'
-            
+            show_hidden = request.query_params.get('show_hidden', 'false') == 'true'          
             # Get all categories with their submissions and files
             base_queryset = EvidenceCategory.objects.select_related(
                 'assignee', 'approver'
@@ -514,13 +513,17 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
                 # When showing active, only show active categories
                 base_queryset = base_queryset.filter(is_active=True)
             
+            total_categories_before_filter = base_queryset.count()
+            
             # Prepare export data
             export_data = []
+            categories_by_group = {}
             for group_code, group_label in CategoryGroup.choices:
                 if group_code == 'UNCATEGORIZED':
                     continue
                     
                 group_categories = base_queryset.filter(category_group=group_code)
+                categories_by_group[group_label] = group_categories.count()
                 
                 for category in group_categories:
                     try:
@@ -608,9 +611,19 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
             
             # Check if we have data to export
             if not export_data:
+                # Log why there's no data
+                total_categories = base_queryset.count()
+                
+                # Return a more informative error with 400 status instead of 404
                 return Response(
-                    {'error': 'No data available to export'},
-                    status=status.HTTP_404_NOT_FOUND
+                    {
+                        'error': 'No data available to export',
+                        'detail': f'No categories found to export. Total filtered categories: {total_categories}, Categories by group: {categories_by_group}',
+                        'total_categories': total_categories,
+                        'show_hidden': show_hidden,
+                        'categories_by_group': categories_by_group
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
                 )
             
             if format_type == 'pdf':
@@ -684,9 +697,11 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
             return response
         except Exception as e:
             import logging
+            import traceback
             logger = logging.getLogger(__name__)
-            logger.error(f"Error generating Excel: {e}", exc_info=True)
-            raise
+            error_msg = f"Error generating Excel: {e}"
+            logger.error(error_msg, exc_info=True)
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
     def _generate_pdf(self, data):
         """Generate PDF file"""
@@ -759,8 +774,11 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
             return response
         except Exception as e:
             import logging
+            import traceback
             logger = logging.getLogger(__name__)
-            logger.error(f"Error generating PDF: {e}", exc_info=True)
+            error_msg = f"Error generating PDF: {e}"
+            logger.error(error_msg, exc_info=True)
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise
 
 

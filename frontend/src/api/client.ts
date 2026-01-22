@@ -54,6 +54,10 @@ apiClient.interceptors.request.use(
   async (config) => {
     console.log('🌐 Request interceptor - URL:', config.url, 'Method:', config.method);
     console.log('🌐 Request interceptor - Full config:', config);
+    // Remove Content-Type header for GET requests (especially for blob responses)
+    if (config.method?.toLowerCase() === 'get' && config.responseType === 'blob') {
+      delete config.headers['Content-Type'];
+    }
     
     // Only add CSRF token for state-changing methods (except login and csrf endpoints)
     const isStateChanging = ['post', 'put', 'patch', 'delete'].includes(config.method?.toLowerCase() || '');
@@ -77,7 +81,6 @@ apiClient.interceptors.request.use(
       }
     }
     
-    console.log('🌐 Request interceptor - Returning config, request will be sent');
     return config;
   },
   (error) => {
