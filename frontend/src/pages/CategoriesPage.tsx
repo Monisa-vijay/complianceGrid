@@ -492,7 +492,7 @@ export const CategoriesPage: React.FC = () => {
             }`}
           >
             <ListFilter size={18} />
-            <span className="text-sm">{showAllCategories ? 'View My Controls' : 'View All Controls'}</span>
+            <span className="text-sm">{showAllCategories ? 'View My Categories' : 'View All Categories'}</span>
           </button>
           
           {/* View Toggle */}

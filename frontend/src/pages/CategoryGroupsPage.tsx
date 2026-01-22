@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Folder, ChevronRight, Target, TrendingUp, Upload, AlertCircle, ChevronDown, ChevronUp, Download, FileText, FileSpreadsheet, Cloud, CheckCircle } from 'lucide-react';
+import { Folder, ChevronRight, Target, TrendingUp, Upload, AlertCircle, ChevronDown, ChevronUp, Download, FileText, FileSpreadsheet, Cloud, CheckCircle, ListFilter } from 'lucide-react';
 import { categoriesApi, CategoryGroup } from '../api/categories';
 import { authApi } from '../api/auth';
 import apiClient from '../api/client';
@@ -11,6 +11,7 @@ export const CategoryGroupsPage: React.FC = () => {
   const navigate = useNavigate();
   const [groups, setGroups] = useState<CategoryGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAllGroups, setShowAllGroups] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     security: true,
     availability: true,
@@ -43,12 +44,12 @@ export const CategoryGroupsPage: React.FC = () => {
   useEffect(() => {
     fetchGroups();
     checkGoogleDriveAuth();
-  }, []);
+  }, [showAllGroups]);
 
   const fetchGroups = async () => {
     try {
       setLoading(true);
-      const data = await categoriesApi.getGroups(false);
+      const data = await categoriesApi.getGroups(false, showAllGroups);
       // Filter out uncategorized and groups with 0 count
       const filtered = data.filter(g => g.code !== 'UNCATEGORIZED' && g.count > 0);
       setGroups(filtered);
@@ -272,6 +273,16 @@ export const CategoryGroupsPage: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-4">
+          {/* View All Categories Button */}
+          <button
+            onClick={() => {
+              setShowAllGroups(!showAllGroups);
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all font-medium  ${showAllGroups ? "bg-blue-500 text-white border-blue-500 hover:bg-blue-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400"}`}
+          >
+            <ListFilter size={18} />
+            <span className="text-sm">{showAllGroups ? 'Show Assigned Groups' : 'View All Groups'}</span>
+          </button>
           {!isGoogleAuthenticated && (
             <Button
               variant="secondary"
