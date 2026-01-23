@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { AlertCircle, CheckCircle, Clock, Search, Filter, X, Grid, List, Table, ChevronLeft, ChevronRight, Eye, EyeOff, ArrowLeft, User, Upload } from 'lucide-react';
+import { AlertCircle, CheckCircle, Clock, Search, Filter, X, Grid, List, Table, ChevronLeft, ChevronRight, Eye, EyeOff, ArrowLeft, User, Upload, ChevronDown, ListFilter } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { categoriesApi, Category } from '../api/categories';
 import { getReviewPeriodLabel, reviewPeriodOptions } from '../utils/reviewPeriods';
@@ -17,6 +17,8 @@ export const CategoriesPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState(''); // Debounced search query for API
   const [reviewPeriodFilter, setReviewPeriodFilter] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [assigneeFilter, setAssigneeFilter] = useState<string>('');
+  const [users, setUsers] = useState<Array<{ id: number; username: string; email: string; first_name: string; last_name: string }>>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('card');
   const [currentPage, setCurrentPage] = useState(1);
@@ -24,6 +26,9 @@ export const CategoriesPage: React.FC = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [showHidden, setShowHidden] = useState(false);
+  const [showAllCategories, setShowAllCategories] = useState(false);
+  const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false);
+  const assigneeDropdownRef = useRef<HTMLDivElement>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -36,8 +41,18 @@ export const CategoriesPage: React.FC = () => {
     if (savedPageSize) {
       setPageSize(parseInt(savedPageSize, 10));
     }
+    fetchUsers();
     fetchCategories();
   }, []);
+
+  const fetchUsers = async () => {
+    try {
+      const usersData = await categoriesApi.getUsers();
+      setUsers(usersData);
+    } catch (error: any) {
+      console.error('Error fetching users:', error);
+    }
+  };
 
   // Debounce search input - update searchQuery after user stops typing for 500ms
   useEffect(() => {
@@ -62,12 +77,12 @@ export const CategoriesPage: React.FC = () => {
   useEffect(() => {
     // Reset to page 1 when filters change
     setCurrentPage(1);
-  }, [searchQuery, reviewPeriodFilter, statusFilter, showHidden, pageSize, groupFilter]);
+  }, [searchQuery, reviewPeriodFilter, statusFilter, assigneeFilter, showHidden, pageSize, groupFilter]);
 
   useEffect(() => {
     // Refetch categories when filters or pagination change
     fetchCategories();
-  }, [searchQuery, reviewPeriodFilter, statusFilter, currentPage, pageSize, showHidden, groupFilter]);
+  }, [searchQuery, reviewPeriodFilter, statusFilter, assigneeFilter, currentPage, pageSize, showHidden, groupFilter, showAllCategories]);
 
   useEffect(() => {
     // Save view preference to localStorage
@@ -78,6 +93,22 @@ export const CategoriesPage: React.FC = () => {
     // Save page size preference
     localStorage.setItem('categoriesPageSize', pageSize.toString());
   }, [pageSize]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (assigneeDropdownRef.current && !assigneeDropdownRef.current.contains(event.target as Node)) {
+        setAssigneeDropdownOpen(false);
+      }
+    };
+
+    if (assigneeDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [assigneeDropdownOpen]);
 
   const fetchCategories = async () => {
     try {
@@ -90,7 +121,9 @@ export const CategoriesPage: React.FC = () => {
         currentPage,
         pageSize,
         showHidden,
-        groupFilter
+        groupFilter,
+        assigneeFilter,
+        showAllCategories
       );
       setCategories(response.results);
       setFilteredCategories(response.results);
@@ -116,6 +149,8 @@ export const CategoriesPage: React.FC = () => {
     setSearchQuery('');
     setReviewPeriodFilter('');
     setStatusFilter('');
+    setAssigneeFilter('');
+    setShowAllCategories(false);
   };
 
   const handlePageSizeChange = (newSize: number) => {
@@ -393,7 +428,7 @@ export const CategoriesPage: React.FC = () => {
     );
   }
 
-  const hasActiveFilters = searchInput || reviewPeriodFilter || statusFilter;
+  const hasActiveFilters = searchInput || reviewPeriodFilter || statusFilter || assigneeFilter || showAllCategories;
   const startItem = (currentPage - 1) * pageSize + 1;
   const endItem = Math.min(currentPage * pageSize, totalCount);
 
@@ -443,6 +478,23 @@ export const CategoriesPage: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          {/* View All Button */}
+          <button
+            onClick={() => {
+              setShowAllCategories(!showAllCategories);
+              setAssigneeFilter('');
+              setCurrentPage(1);
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all font-medium ${
+              showAllCategories
+                ? 'bg-blue-500 text-white border-blue-500 hover:bg-blue-600'
+                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400'
+            }`}
+          >
+            <ListFilter size={18} />
+            <span className="text-sm">{showAllCategories ? 'View My Categories' : 'View All Categories'}</span>
+          </button>
+          
           {/* View Toggle */}
           <div className="flex items-center gap-2 bg-white rounded-lg shadow-sm border border-gray-200 p-1">
             <button
@@ -520,7 +572,7 @@ export const CategoriesPage: React.FC = () => {
             <span className="text-sm">Filters</span>
             {hasActiveFilters && (
               <span className="bg-blue-500 text-white text-xs font-bold rounded-full px-2 py-0.5 min-w-[20px] text-center">
-                {[searchInput, reviewPeriodFilter, statusFilter].filter(Boolean).length}
+                {[searchInput, reviewPeriodFilter, statusFilter, assigneeFilter, showAllCategories].filter(Boolean).length}
               </span>
             )}
           </button>
@@ -539,7 +591,7 @@ export const CategoriesPage: React.FC = () => {
 
         {/* Filter Options */}
         {showFilters && (
-          <div className="mt-5 pt-5 border-t border-gray-200 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="mt-5 pt-5 pb-8 border-t border-gray-200 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Review Period Filter */}
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -578,6 +630,74 @@ export const CategoriesPage: React.FC = () => {
                 <option value="REJECTED">Rejected</option>
                 <option value="no-submission">No Active Submission</option>
               </select>
+            </div>
+
+            {/* Assignee Filter */}
+            <div className="relative">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Assignee
+              </label>
+              <div className="relative" ref={assigneeDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setAssigneeDropdownOpen(!assigneeDropdownOpen)}
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all bg-white text-left flex items-center justify-between hover:border-gray-400"
+                >
+                  <span className="text-gray-900">
+                    {assigneeFilter
+                      ? (() => {
+                          const selectedUser = users.find(u => u.id.toString() === assigneeFilter);
+                          if (selectedUser) {
+                            return selectedUser.first_name && selectedUser.last_name
+                              ? `${selectedUser.first_name} ${selectedUser.last_name}`.trim()
+                              : selectedUser.first_name || selectedUser.last_name || selectedUser.username;
+                          }
+                          return 'All Assignees';
+                        })()
+                      : 'All Assignees'}
+                  </span>
+                  <ChevronDown 
+                    size={18} 
+                    className={`text-gray-500 transition-transform ${assigneeDropdownOpen ? 'transform rotate-180' : ''}`}
+                  />
+                </button>
+                {assigneeDropdownOpen && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAssigneeFilter('');
+                        setAssigneeDropdownOpen(false);
+                      }}
+                      className={`w-full px-3 py-2 text-left hover:bg-gray-100 transition-colors ${
+                        assigneeFilter === '' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-900'
+                      }`}
+                    >
+                      All Assignees
+                    </button>
+                    {users.map((user) => {
+                      const displayName = user.first_name && user.last_name
+                        ? `${user.first_name} ${user.last_name}`.trim()
+                        : user.first_name || user.last_name || user.username;
+                      return (
+                        <button
+                          key={user.id}
+                          type="button"
+                          onClick={() => {
+                            setAssigneeFilter(user.id.toString());
+                            setAssigneeDropdownOpen(false);
+                          }}
+                          className={`w-full px-3 py-2 text-left hover:bg-gray-100 transition-colors ${
+                            assigneeFilter === user.id.toString() ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-900'
+                          }`}
+                        >
+                          {displayName}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}

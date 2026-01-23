@@ -119,6 +119,28 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
         if category_group:
             queryset = queryset.filter(category_group=category_group)
         
+        # Filter by assignee - only apply filtering for list view
+        # For other actions (retrieve, update, delete, etc.), allow access to all categories
+        assignee = self.request.query_params.get('assignee', '')
+        show_all = self.request.query_params.get('show_all', 'false') == 'true'
+        is_list_view = self.action == 'list'
+        
+        if is_list_view:
+            # If user is authenticated and no explicit assignee filter is provided and show_all is false,
+            # filter by current user's assigned categories
+            if not assignee and not show_all and self.request.user.is_authenticated:
+                # For list views, filter by current user's assigned categories only
+                queryset = queryset.filter(assignee=self.request.user)
+            elif assignee:
+                # If explicit assignee filter is provided, use it
+                try:
+                    assignee_id = int(assignee)
+                    queryset = queryset.filter(assignee_id=assignee_id)
+                except (ValueError, TypeError):
+                    # If assignee is not a valid integer, ignore the filter
+                    pass
+            # If show_all is true, don't apply any assignee filter (show all categories including unassigned)
+        
         # Filter by submission status
         status = self.request.query_params.get('status', '')
         if status:
@@ -187,6 +209,7 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
     def groups(self, request):
         """Get all category groups with counts and compliance scores"""
         show_hidden = request.query_params.get('show_hidden', 'false') == 'true'
+        show_all = request.query_params.get('show_all', 'false') == 'true'
         base_queryset = EvidenceCategory.objects.prefetch_related(
             Prefetch(
                 'submissions',
@@ -199,6 +222,10 @@ class EvidenceCategoryViewSet(viewsets.ModelViewSet):
         else:
             # When showing active, only show active categories
             base_queryset = base_queryset.filter(is_active=True)
+        
+        # Filter by assigned categories for logged-in user (unless show_all is true)
+        if not show_all and request.user.is_authenticated:
+            base_queryset = base_queryset.filter(assignee=request.user)
         
         groups = []
         for group_code, group_label in CategoryGroup.choices:

@@ -117,7 +117,9 @@ export const categoriesApi = {
     page: number = 1,
     pageSize: number = 20,
     showHidden: boolean = false,
-    categoryGroup: string = ''
+    categoryGroup: string = '',
+    assignee: string = '',
+    showAll: boolean = false
   ): Promise<{ results: Category[]; count: number; next: string | null; previous: string | null }> => {
     const params: any = {};
     if (showHidden) {
@@ -129,6 +131,8 @@ export const categoriesApi = {
     if (reviewPeriod) params.review_period = reviewPeriod;
     if (status) params.status = status;
     if (categoryGroup) params.category_group = categoryGroup;
+    if (assignee) params.assignee = assignee;
+    if (showAll) params.show_all = 'true';
     params.page = page;
     params.page_size = pageSize === 10000 ? 10000 : pageSize; // "All" = 10000
     
@@ -186,10 +190,12 @@ export const categoriesApi = {
     return response.data;
   },
 
-  getGroups: async (showHidden: boolean = false): Promise<CategoryGroup[]> => {
-    const response = await apiClient.get('/categories/groups/', {
-      params: { show_hidden: showHidden },
-    });
+  getGroups: async (showHidden: boolean = false, showAll: boolean = false): Promise<CategoryGroup[]> => {
+    const params: any = { show_hidden: showHidden };
+    if (showAll) {
+      params.show_all = 'true';
+    }
+    const response = await apiClient.get('/categories/groups/', { params });
     return response.data;
   },
 
