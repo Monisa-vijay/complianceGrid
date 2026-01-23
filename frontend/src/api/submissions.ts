@@ -82,6 +82,11 @@ export const submissionsApi = {
     return response.data;
   },
 
+  getAnalytics: async (params?: { my_assignments?: boolean }): Promise<any> => {
+    const response = await apiClient.get('/submissions/analytics/', { params });
+    return response.data;
+  },
+
   // File-level approval/rejection
   approveFile: async (fileId: number, reviewNotes?: string): Promise<any & {
     upload_status?: string;

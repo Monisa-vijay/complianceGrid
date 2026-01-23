@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { File, Calendar, User, Download, Filter, X } from 'lucide-react';
+import { File, Calendar, User, Filter, X, Eye } from 'lucide-react';
 import { documentsApi, GroupedDocument } from '../api/documents';
 import { categoriesApi, Category } from '../api/categories';
 import toast from 'react-hot-toast';
@@ -256,7 +256,7 @@ export const DocumentsPage: React.FC = () => {
                               rel="noopener noreferrer"
                               className="flex items-center gap-1 text-blue-600 hover:text-blue-700 text-sm font-medium"
                             >
-                              <Download size={16} />
+                              <Eye size={16} />
                               View
                             </a>
                           </div>

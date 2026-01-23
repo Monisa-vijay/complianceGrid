@@ -216,3 +216,68 @@ class NotificationSerializer(serializers.ModelSerializer):
         fields = ['id', 'notification_type', 'title', 'message', 'category', 'category_name', 
                   'category_id', 'submission', 'submission_id', 'is_read', 'created_at']
 
+
+class CategoryGroupAnalyticsSerializer(serializers.Serializer):
+    group_code = serializers.CharField()
+    group_label = serializers.CharField()
+    total_controls = serializers.IntegerField()
+    compliance_score = serializers.FloatField()
+    overdue_count = serializers.IntegerField()
+    at_risk_count = serializers.IntegerField()
+    compliant_count = serializers.IntegerField()
+    no_data_count = serializers.IntegerField()
+
+
+class PriorityIssueSerializer(serializers.Serializer):
+    priority = serializers.IntegerField()
+    control_id = serializers.IntegerField()
+    control_name = serializers.CharField()
+    status = serializers.CharField()
+    days_overdue = serializers.IntegerField(allow_null=True)
+    assignee_name = serializers.CharField(allow_null=True)
+    assignee_id = serializers.IntegerField(allow_null=True)
+    issue_type = serializers.CharField()
+    compliance_score = serializers.FloatField(allow_null=True)
+
+
+class UpcomingDeadlineSerializer(serializers.Serializer):
+    control_id = serializers.IntegerField()
+    control_name = serializers.CharField()
+    due_date = serializers.DateField()
+    days_until_due = serializers.IntegerField()
+    review_period = serializers.CharField()
+    assignee_name = serializers.CharField(allow_null=True)
+    status = serializers.CharField()
+
+
+class AnalyticsSerializer(serializers.Serializer):
+    # Action Required
+    overdue_count = serializers.IntegerField()
+    overdue_aging = serializers.DictField()
+    my_assignments_count = serializers.IntegerField()
+    pending_approvals_count = serializers.IntegerField()
+    no_evidence_count = serializers.IntegerField()
+    missing_assignees_count = serializers.IntegerField()
+    missing_approvers_count = serializers.IntegerField()
+    
+    # Compliance Health
+    overall_compliance_score = serializers.FloatField()
+    compliance_trend = serializers.CharField()
+    category_groups = CategoryGroupAnalyticsSerializer(many=True)
+    at_risk_controls_count = serializers.IntegerField()
+    
+    # What's Due Next
+    due_next_7_days = serializers.IntegerField()
+    due_next_14_days = serializers.IntegerField()
+    due_next_30_days = serializers.IntegerField()
+    upcoming_deadlines_by_period = serializers.DictField()
+    upcoming_deadlines = UpcomingDeadlineSerializer(many=True)
+    
+    # Workflow Efficiency
+    average_approval_time_hours = serializers.FloatField(allow_null=True)
+    rejection_rate = serializers.FloatField()
+    submission_trends = serializers.ListField()
+    bottleneck_approvers = serializers.ListField()
+    
+    # Risk & Gap Analysis
+    priority_issues = PriorityIssueSerializer(many=True)

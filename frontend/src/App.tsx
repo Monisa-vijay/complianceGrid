@@ -5,7 +5,7 @@ import { Toaster } from 'react-hot-toast';
 // import { LogOut, User } from 'lucide-react';
 import { CategoriesPage } from './pages/CategoriesPage';
 import { CategoryDetailPage } from './pages/CategoryDetailPage';
-import { DashboardPage } from './pages/DashboardPage';
+import { AnalyticsPage } from './pages/AnalyticsPage';
 import { CategoryGroupsPage } from './pages/CategoryGroupsPage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { LoginPage } from './pages/LoginPage';
@@ -185,14 +185,14 @@ function AppContent() {
                     Documents
                   </Link>
                   <Link
-                    to="/dashboard"
+                    to="/analytics"
                     className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      location.pathname === '/dashboard'
+                      location.pathname === '/analytics'
                         ? 'bg-blue-100 text-blue-700 font-semibold'
                         : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                     }`}
                   >
-                    Dashboard
+                    Analytics
                   </Link>
               </div>
             </div>
@@ -239,10 +239,10 @@ function AppContent() {
             }
           />
           <Route
-            path="/dashboard"
+            path="/analytics"
             element={
               <ProtectedRoute>
-                <DashboardPage />
+                <AnalyticsPage />
               </ProtectedRoute>
             }
           />

@@ -25,7 +25,7 @@ from .serializers import (
     EvidenceCategorySerializer, EvidenceCategoryDetailSerializer,
     EvidenceSubmissionSerializer, EvidenceFileSerializer,
     SubmissionCommentSerializer, DashboardStatsSerializer, UserSerializer,
-    NotificationSerializer
+    NotificationSerializer, AnalyticsSerializer
 )
 from .services.google_drive import GoogleDriveService
 from django.contrib.auth.models import User
@@ -1151,6 +1151,402 @@ class EvidenceSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
             'upcoming_deadlines': upcoming_deadlines
         })
         
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def analytics(self, request):
+        """Get comprehensive analytics data for the compliance dashboard"""
+        from collections import defaultdict
+        from django.db.models import Avg, Count, Q, F, Sum
+        
+        # Automatically create due date notifications
+        create_due_date_notifications()
+        
+        today = timezone.now().date()
+        start_of_month = today.replace(day=1)
+        six_months_ago = today - timedelta(days=180)
+        
+        # Filter by user assignments if requested
+        my_assignments_only = request.query_params.get('my_assignments', 'false') == 'true'
+        active_categories = EvidenceCategory.objects.filter(is_active=True)
+        
+        if my_assignments_only and request.user.is_authenticated:
+            active_categories = active_categories.filter(assignee=request.user)
+        
+        # ========== ACTION REQUIRED ==========
+        # Overdue submissions with aging
+        overdue_submissions = EvidenceSubmission.objects.filter(
+            status=EvidenceStatus.PENDING,
+            due_date__lt=today
+        )
+        if my_assignments_only and request.user.is_authenticated:
+            overdue_submissions = overdue_submissions.filter(category__assignee=request.user)
+        
+        overdue_count = overdue_submissions.count()
+        
+        # Calculate aging buckets
+        overdue_aging = {
+            '1_7_days': overdue_submissions.filter(
+                due_date__gte=today - timedelta(days=7)
+            ).count(),
+            '8_30_days': overdue_submissions.filter(
+                due_date__gte=today - timedelta(days=30),
+                due_date__lt=today - timedelta(days=7)
+            ).count(),
+            'over_30_days': overdue_submissions.filter(
+                due_date__lt=today - timedelta(days=30)
+            ).count()
+        }
+        
+        # My assignments awaiting submission
+        my_assignments_count = 0
+        if request.user.is_authenticated:
+            my_assignments_count = active_categories.filter(
+                assignee=request.user
+            ).filter(
+                submissions__status=EvidenceStatus.PENDING,
+                submissions__due_date__gte=today
+            ).distinct().count()
+        
+        # Pending approvals
+        pending_approvals = EvidenceSubmission.objects.filter(
+            status__in=[EvidenceStatus.SUBMITTED, EvidenceStatus.UNDER_REVIEW]
+        )
+        if my_assignments_only and request.user.is_authenticated:
+            pending_approvals = pending_approvals.filter(category__assignee=request.user)
+        pending_approvals_count = pending_approvals.count()
+        
+        # Controls with no evidence in 2+ review cycles
+        # This is a simplified check - controls without recent approved submissions
+        categories_with_recent_approved = EvidenceSubmission.objects.filter(
+            status=EvidenceStatus.APPROVED,
+            reviewed_at__gte=six_months_ago
+        ).values_list('category_id', flat=True).distinct()
+        no_evidence_count = active_categories.exclude(
+            id__in=categories_with_recent_approved
+        ).count()
+        
+        # Missing assignees/approvers
+        missing_assignees_count = active_categories.filter(assignee__isnull=True).count()
+        missing_approvers_count = active_categories.filter(approver__isnull=True).count()
+        
+        # ========== COMPLIANCE HEALTH ==========
+        # Calculate overall compliance score
+        total_score = 0
+        total_categories = 0
+        category_scores = []
+        
+        for category in active_categories.prefetch_related('submissions__files'):
+            score = category.calculate_compliance_score()
+            category_scores.append(score)
+            total_score += score
+            total_categories += 1
+        
+        overall_compliance_score = (total_score / total_categories * 100) if total_categories > 0 else 0
+        
+        # Calculate trend (simplified - compare with last month)
+        last_month_start = (start_of_month - timedelta(days=32)).replace(day=1)
+        last_month_end = start_of_month - timedelta(days=1)
+        
+        last_month_approved = EvidenceSubmission.objects.filter(
+            status=EvidenceStatus.APPROVED,
+            reviewed_at__gte=last_month_start,
+            reviewed_at__lte=last_month_end
+        ).count()
+        
+        this_month_approved = EvidenceSubmission.objects.filter(
+            status=EvidenceStatus.APPROVED,
+            reviewed_at__gte=start_of_month
+        ).count()
+        
+        if last_month_approved > 0:
+            trend_change = ((this_month_approved - last_month_approved) / last_month_approved) * 100
+            if trend_change > 5:
+                compliance_trend = 'up'
+            elif trend_change < -5:
+                compliance_trend = 'down'
+            else:
+                compliance_trend = 'stable'
+        else:
+            compliance_trend = 'stable'
+        
+        # Category group heatmap
+        category_groups = []
+        for group_code, group_label in CategoryGroup.choices:
+            group_categories = active_categories.filter(category_group=group_code)
+            group_total = group_categories.count()
+            
+            if group_total == 0:
+                continue
+            
+            # Calculate group compliance
+            group_score_sum = 0
+            group_overdue = 0
+            group_at_risk = 0
+            group_compliant = 0
+            group_no_data = 0
+            
+            for cat in group_categories.prefetch_related('submissions__files'):
+                score = cat.calculate_compliance_score()
+                group_score_sum += score
+                
+                # Check if overdue
+                has_overdue = cat.submissions.filter(
+                    status=EvidenceStatus.PENDING,
+                    due_date__lt=today
+                ).exists()
+                
+                if has_overdue:
+                    group_overdue += 1
+                
+                if score >= 80:
+                    group_compliant += 1
+                elif score >= 50:
+                    group_at_risk += 1
+                else:
+                    group_no_data += 1
+            
+            group_compliance = (group_score_sum / group_total) if group_total > 0 else 0
+            
+            category_groups.append({
+                'group_code': group_code,
+                'group_label': group_label,
+                'total_controls': group_total,
+                'compliance_score': round(group_compliance, 1),
+                'overdue_count': group_overdue,
+                'at_risk_count': group_at_risk,
+                'compliant_count': group_compliant,
+                'no_data_count': group_no_data
+            })
+        
+        # At-risk controls count
+        at_risk_controls_count = sum(1 for score in category_scores if 50 <= score < 80)
+        
+        # ========== WHAT'S DUE NEXT ==========
+        upcoming_7 = EvidenceSubmission.objects.filter(
+            status=EvidenceStatus.PENDING,
+            due_date__gte=today,
+            due_date__lte=today + timedelta(days=7)
+        )
+        upcoming_14 = EvidenceSubmission.objects.filter(
+            status=EvidenceStatus.PENDING,
+            due_date__gte=today,
+            due_date__lte=today + timedelta(days=14)
+        )
+        upcoming_30 = EvidenceSubmission.objects.filter(
+            status=EvidenceStatus.PENDING,
+            due_date__gte=today,
+            due_date__lte=today + timedelta(days=30)
+        )
+        
+        if my_assignments_only and request.user.is_authenticated:
+            upcoming_7 = upcoming_7.filter(category__assignee=request.user)
+            upcoming_14 = upcoming_14.filter(category__assignee=request.user)
+            upcoming_30 = upcoming_30.filter(category__assignee=request.user)
+        
+        due_next_7_days = upcoming_7.count()
+        due_next_14_days = upcoming_14.count()
+        due_next_30_days = upcoming_30.count()
+        
+        # Group by review period
+        upcoming_deadlines_by_period = defaultdict(int)
+        upcoming_deadlines_list = []
+        
+        for submission in upcoming_30.select_related('category', 'category__assignee').order_by('due_date')[:50]:
+            period = submission.category.review_period
+            upcoming_deadlines_by_period[period] += 1
+            
+            days_until = (submission.due_date - today).days
+            upcoming_deadlines_list.append({
+                'control_id': submission.category.id,
+                'control_name': submission.category.name,
+                'due_date': submission.due_date,
+                'days_until_due': days_until,
+                'review_period': period,
+                'assignee_name': (
+                    f"{submission.category.assignee.first_name} {submission.category.assignee.last_name}".strip()
+                    if submission.category.assignee and (submission.category.assignee.first_name or submission.category.assignee.last_name)
+                    else (submission.category.assignee.username if submission.category.assignee else None)
+                ),
+                'status': submission.status
+            })
+        
+        # ========== WORKFLOW EFFICIENCY ==========
+        # Average approval time
+        approved_submissions = EvidenceSubmission.objects.filter(
+            status=EvidenceStatus.APPROVED,
+            reviewed_at__isnull=False,
+            submitted_at__isnull=False
+        )
+        
+        if approved_submissions.exists():
+            approval_times = []
+            for sub in approved_submissions:
+                if sub.submitted_at and sub.reviewed_at:
+                    delta = sub.reviewed_at - sub.submitted_at
+                    approval_times.append(delta.total_seconds() / 3600)  # Convert to hours
+            
+            average_approval_time_hours = sum(approval_times) / len(approval_times) if approval_times else None
+        else:
+            average_approval_time_hours = None
+        
+        # Rejection rate
+        total_reviewed = EvidenceSubmission.objects.filter(
+            status__in=[EvidenceStatus.APPROVED, EvidenceStatus.REJECTED],
+            reviewed_at__isnull=False
+        ).count()
+        
+        rejected_count = EvidenceSubmission.objects.filter(
+            status=EvidenceStatus.REJECTED
+        ).count()
+        
+        rejection_rate = (rejected_count / total_reviewed * 100) if total_reviewed > 0 else 0
+        
+        # Submission trends (last 6 months)
+        submission_trends = []
+        for i in range(6):
+            month_start = (today - timedelta(days=30 * i)).replace(day=1)
+            if i == 0:
+                month_end = today
+            else:
+                next_month = month_start + timedelta(days=32)
+                month_end = next_month.replace(day=1) - timedelta(days=1)
+            
+            count = EvidenceSubmission.objects.filter(
+                submitted_at__gte=month_start,
+                submitted_at__lte=month_end
+            ).count()
+            
+            submission_trends.append({
+                'month': month_start.strftime('%Y-%m'),
+                'count': count
+            })
+        
+        submission_trends.reverse()
+        
+        # Bottleneck approvers (approvers with most pending)
+        approver_bottlenecks = EvidenceSubmission.objects.filter(
+            status__in=[EvidenceStatus.SUBMITTED, EvidenceStatus.UNDER_REVIEW]
+        ).values('category__approver__username', 'category__approver__first_name').annotate(
+            pending_count=Count('id')
+        ).order_by('-pending_count')[:5]
+        
+        bottleneck_approvers = [
+            {
+                'username': item['category__approver__username'] or 'Unassigned',
+                'name': item['category__approver__first_name'] or 'Unassigned',
+                'pending_count': item['pending_count']
+            }
+            for item in approver_bottlenecks
+        ]
+        
+        # ========== RISK & GAP ANALYSIS ==========
+        priority_issues = []
+        priority = 1
+        
+        # Controls with no evidence
+        for category in active_categories.filter(
+            id__in=active_categories.exclude(
+                id__in=EvidenceSubmission.objects.filter(
+                    status=EvidenceStatus.APPROVED,
+                    reviewed_at__gte=six_months_ago
+                ).values_list('category_id', flat=True)
+            )
+        )[:10]:
+            score = category.calculate_compliance_score()
+            priority_issues.append({
+                'priority': priority,
+                'control_id': category.id,
+                'control_name': category.name,
+                'status': 'NO_EVIDENCE',
+                'days_overdue': None,
+                'assignee_name': (
+                    f"{category.assignee.first_name} {category.assignee.last_name}".strip()
+                    if category.assignee and (category.assignee.first_name or category.assignee.last_name)
+                    else (category.assignee.username if category.assignee else None)
+                ),
+                'assignee_id': category.assignee.id if category.assignee else None,
+                'issue_type': 'No evidence submitted recently',
+                'compliance_score': score
+            })
+            priority += 1
+        
+        # Controls without assignees
+        for category in active_categories.filter(assignee__isnull=True)[:5]:
+            priority_issues.append({
+                'priority': priority,
+                'control_id': category.id,
+                'control_name': category.name,
+                'status': 'NO_ASSIGNEE',
+                'days_overdue': None,
+                'assignee_name': None,
+                'assignee_id': None,
+                'issue_type': 'No assignee assigned',
+                'compliance_score': category.calculate_compliance_score()
+            })
+            priority += 1
+        
+        # Overdue controls
+        overdue_categories = active_categories.filter(
+            id__in=EvidenceSubmission.objects.filter(
+                status=EvidenceStatus.PENDING,
+                due_date__lt=today
+            ).values_list('category_id', flat=True)
+        ).distinct()[:10]
+        
+        for category in overdue_categories:
+            overdue_sub = category.submissions.filter(
+                status=EvidenceStatus.PENDING,
+                due_date__lt=today
+            ).order_by('due_date').first()
+            
+            if overdue_sub:
+                days_overdue = (today - overdue_sub.due_date).days
+                priority_issues.append({
+                    'priority': priority,
+                    'control_id': category.id,
+                    'control_name': category.name,
+                    'status': 'OVERDUE',
+                    'days_overdue': days_overdue,
+                    'assignee_name': (
+                        f"{category.assignee.first_name} {category.assignee.last_name}".strip()
+                        if category.assignee and (category.assignee.first_name or category.assignee.last_name)
+                        else (category.assignee.username if category.assignee else None)
+                    ),
+                    'assignee_id': category.assignee.id if category.assignee else None,
+                    'issue_type': f'Overdue by {days_overdue} days',
+                    'compliance_score': category.calculate_compliance_score()
+                })
+                priority += 1
+        
+        # Sort by priority
+        priority_issues = sorted(priority_issues, key=lambda x: x['priority'])[:10]
+        
+        analytics_data = {
+            'overdue_count': overdue_count,
+            'overdue_aging': overdue_aging,
+            'my_assignments_count': my_assignments_count,
+            'pending_approvals_count': pending_approvals_count,
+            'no_evidence_count': no_evidence_count,
+            'missing_assignees_count': missing_assignees_count,
+            'missing_approvers_count': missing_approvers_count,
+            'overall_compliance_score': round(overall_compliance_score, 1),
+            'compliance_trend': compliance_trend,
+            'category_groups': category_groups,
+            'at_risk_controls_count': at_risk_controls_count,
+            'due_next_7_days': due_next_7_days,
+            'due_next_14_days': due_next_14_days,
+            'due_next_30_days': due_next_30_days,
+            'upcoming_deadlines_by_period': dict(upcoming_deadlines_by_period),
+            'upcoming_deadlines': upcoming_deadlines_list,
+            'average_approval_time_hours': round(average_approval_time_hours, 1) if average_approval_time_hours else None,
+            'rejection_rate': round(rejection_rate, 1),
+            'submission_trends': submission_trends,
+            'bottleneck_approvers': bottleneck_approvers,
+            'priority_issues': priority_issues
+        }
+        
+        serializer = AnalyticsSerializer(analytics_data)
         return Response(serializer.data)
 
 
