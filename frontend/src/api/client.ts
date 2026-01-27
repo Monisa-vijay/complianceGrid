@@ -1,7 +1,23 @@
 import axios from 'axios';
 
+// Use environment variable for backend URL in production, or relative /api for development
+const getBaseURL = (): string => {
+  // In production, use the full backend URL from environment variable
+  if (process.env.REACT_APP_API_URL) {
+    const baseURL = `${process.env.REACT_APP_API_URL}/api`;
+    console.log('🔵 Using backend URL from REACT_APP_API_URL:', baseURL);
+    return baseURL;
+  }
+  // In development, use relative URL (will be proxied by setupProxy.js)
+  console.log('🔵 Using relative /api URL (development mode)');
+  return '/api';
+};
+
+const baseURL = getBaseURL();
+console.log('🔵 API Client baseURL:', baseURL);
+
 const apiClient = axios.create({
-  baseURL: '/api',
+  baseURL: baseURL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -34,9 +50,8 @@ const fetchCsrfToken = async (): Promise<string | null> => {
   }
   
   csrfTokenFetching = true;
-  csrfTokenPromise = axios.get('/api/auth/csrf/', {
-    withCredentials: true,
-  }).then(() => {
+  // Use apiClient to ensure correct baseURL is used
+  csrfTokenPromise = apiClient.get('/auth/csrf/').then(() => {
     csrfTokenFetching = false;
     csrfTokenPromise = null;
   }).catch((error) => {
