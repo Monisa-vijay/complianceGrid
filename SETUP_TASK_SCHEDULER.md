@@ -62,7 +62,10 @@ If you prefer to set it up manually:
      - Check **"Start the task only if the computer is on AC power"** (optional)
      - Check **"Start the task only if the following network connection is available"** (optional)
      - Click **OK**
-     - Enter your Windows password if prompted
+     - **If prompted for credentials:**
+       - **Username**: Your Windows username (e.g., `monisa.DATATERRAINAD` or `DATATERRAINAD\monisa.DATATERRAINAD`)
+       - **Password**: Your Windows account password
+       - This is required for tasks that run when you're not logged in
 
 ## Verify the Task
 

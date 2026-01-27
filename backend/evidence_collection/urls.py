@@ -9,6 +9,8 @@ from django.conf.urls.static import static
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('evidence.urls')),
+    # Also include without /api/ prefix for production reverse proxy that strips it
+    path('', include('evidence.urls')),
 ]
 
 # Serve media files in development

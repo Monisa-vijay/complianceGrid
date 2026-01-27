@@ -18,7 +18,7 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-change-this-in-produc
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'compliancegrid-backend.dataterrain-demo.net']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'compliancegrid-backend.dataterrain-demo.net', 'compliancegrid.dataterrain-demo.net']
 
 # Application definition
 INSTALLED_APPS = [
@@ -167,8 +167,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:8000",
     "http://127.0.0.1:8000",
     "https://compliancegrid-backend.dataterrain-demo.net",
-    # Add your frontend production URL here, e.g.:
-    # "https://compliancegrid-frontend.dataterrain-demo.net",
+    "https://compliancegrid.dataterrain-demo.net",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -209,6 +208,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:8000/",
     "https://compliancegrid-backend.dataterrain-demo.net",
     "https://compliancegrid-backend.dataterrain-demo.net/",
+    "https://compliancegrid.dataterrain-demo.net",
+    "https://compliancegrid.dataterrain-demo.net/",
 ]
 
 # CSRF cookie settings
