@@ -4,6 +4,10 @@ Django settings for evidence_collection project.
 
 from pathlib import Path
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -14,7 +18,7 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-change-this-in-produc
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'compliancegrid-backend.dataterrain-demo.net']
 
 # Application definition
 INSTALLED_APPS = [
@@ -48,13 +52,13 @@ CSRF_COOKIE_NAME = 'csrftoken'
 CSRF_COOKIE_HTTPONLY = False  # Allow JavaScript to read it
 CSRF_USE_SESSIONS = False  # Use cookie-based CSRF tokens
 CSRF_COOKIE_SAMESITE = 'Lax'  # Allow cross-site requests for development
-CSRF_COOKIE_SECURE = False  # Set to True in production with HTTPS
+CSRF_COOKIE_SECURE = True  # Set to True in production with HTTPS
 
 # Session cookie settings
 SESSION_COOKIE_NAME = 'sessionid'
 SESSION_COOKIE_HTTPONLY = True  # Session cookie should be httpOnly for security
 SESSION_COOKIE_SAMESITE = 'Lax'  # Allow cross-site requests for development
-SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
+SESSION_COOKIE_SECURE = True  # Set to True in production with HTTPS
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 7  # 7 days
 SESSION_SAVE_EVERY_REQUEST = False
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
@@ -161,6 +165,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
+    "https://compliancegrid-backend.dataterrain-demo.net",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -189,11 +194,13 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:8000/",
     "http://127.0.0.1:8000",
     "http://127.0.0.1:8000/",
+    "https://compliancegrid-backend.dataterrain-demo.net",
+    "https://compliancegrid-backend.dataterrain-demo.net/",
 ]
 
 # CSRF cookie settings
 CSRF_COOKIE_SAMESITE = 'Lax'  # Allow cross-site requests for development
-CSRF_COOKIE_SECURE = False  # Set to True in production with HTTPS
+CSRF_COOKIE_SECURE = True  # Set to True in production with HTTPS
 
 # Email configuration
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
