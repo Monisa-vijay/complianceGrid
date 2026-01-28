@@ -101,7 +101,7 @@ class EvidenceCategorySerializer(serializers.ModelSerializer):
                   'current_submission', 'past_submissions', 'compliance_score']
     
     def get_current_submission(self, obj):
-        """Get the current/active submission with files filtered to include status 'PENDING', 'SUBMITTED', or 'UNDER_REVIEW'.
+        """Get the current/active submission with files filtered to include status 'PENDING', 'SUBMITTED', or 'UNDER_REVIEW'."""
         try:
             from .models import EvidenceStatus, EvidenceSubmission
             from django.utils import timezone

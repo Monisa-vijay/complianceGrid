@@ -1049,8 +1049,8 @@ ComplianceGrid System
                             [category.approver.email],
                             fail_silently=False,
                         )
-            except Exception as e:
-                logger.error(f"Failed to send email notification to approver: {str(e)}", exc_info=True)
+                    except Exception as e:
+                        logger.error(f"Failed to send email notification to approver: {str(e)}", exc_info=True)
             
             serializer = EvidenceSubmissionSerializer(submission, context={'request': request})
             response_data = serializer.data
@@ -1063,6 +1063,12 @@ ComplianceGrid System
                 response_data['upload_status'] = 'Files approved and uploaded to Google Drive successfully.'
             
             return Response(response_data, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.error(f"Error in submit: {str(e)}", exc_info=True)
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     @action(detail=True, methods=['patch'])
     def update_due_date(self, request, pk=None):
@@ -1177,15 +1183,14 @@ ComplianceGrid System
                                 evidence_file.google_drive_file_url = drive_result['web_url']
                                 evidence_file.save()
                                 uploaded_count += 1
-                except Exception as e:
-                    # Log error and collect for response
-                    error_msg = f"Failed to upload {evidence_file.filename} to Google Drive: {str(e)}"
-                    logger.error(error_msg, exc_info=True)
-                    upload_errors.append(error_msg)
+                            except Exception as e:
+                                # Log error and collect for response
+                                error_msg = f"Failed to upload {evidence_file.filename} to Google Drive: {str(e)}"
+                                logger.error(error_msg, exc_info=True)
+                                upload_errors.append(error_msg)
                         else:
                             error_msg = f"Local file not found for {evidence_file.filename}"
                             upload_errors.append(error_msg)
-                            
                 except Exception as e:
                     # Log error and collect for response
                     error_msg = f"Failed to initialize Google Drive service: {str(e)}"
@@ -1263,8 +1268,8 @@ ComplianceGrid System
                     [category.assignee.email],
                     fail_silently=False,
                 )
-                except Exception as e:
-                    logger.error(f"Failed to send email notification to assignee: {str(e)}", exc_info=True)
+            except Exception as e:
+                logger.error(f"Failed to send email notification to assignee: {str(e)}", exc_info=True)
         
         serializer = EvidenceSubmissionSerializer(submission)
         return Response(serializer.data)
@@ -2436,11 +2441,10 @@ class EvidenceFileViewSet(viewsets.ReadOnlyModelViewSet):
                             upload_errors.append(error_msg)
                     elif evidence_file.google_drive_file_id:
                         uploaded = True  # Already uploaded
-                        
-                        except Exception as e:
-                            error_msg = f"Failed to initialize Google Drive service: {str(e)}"
-                            logger.error(error_msg, exc_info=True)
-                            upload_errors.append(error_msg)
+                except Exception as e:
+                    error_msg = f"Failed to initialize Google Drive service: {str(e)}"
+                    logger.error(error_msg, exc_info=True)
+                    upload_errors.append(error_msg)
             else:
                 upload_errors.append("Google Drive not authenticated. Please authenticate Google Drive first.")
         else:
@@ -2514,8 +2518,8 @@ ComplianceGrid System
                     [category.assignee.email],
                     fail_silently=False,
                 )
-                except Exception as e:
-                    logger.error(f"Failed to send email notification to assignee: {str(e)}", exc_info=True)
+            except Exception as e:
+                logger.error(f"Failed to send email notification to assignee: {str(e)}", exc_info=True)
         
         serializer = EvidenceFileSerializer(evidence_file, context={'request': request})
         return Response(serializer.data)
