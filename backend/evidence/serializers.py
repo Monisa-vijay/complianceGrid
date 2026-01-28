@@ -101,22 +101,71 @@ class EvidenceCategorySerializer(serializers.ModelSerializer):
                   'current_submission', 'past_submissions', 'compliance_score']
     
     def get_current_submission(self, obj):
-        """Get the current/active submission with files filtered to only include status 'SUBMITTED'"""
+        """Get the current/active submission with files filtered to include status 'PENDING', 'SUBMITTED', or 'UNDER_REVIEW'.
         try:
-            from .models import EvidenceStatus
+            from .models import EvidenceStatus, EvidenceSubmission
+            from django.utils import timezone
+            from datetime import timedelta
             
             # Get the active submission (PENDING, SUBMITTED, or UNDER_REVIEW)
             submission = obj.submissions.filter(
                 status__in=[EvidenceStatus.PENDING, EvidenceStatus.SUBMITTED, EvidenceStatus.UNDER_REVIEW]
             ).order_by('-due_date').first()
             
+            # If no active submission exists, create one
+            if not submission:
+                today = timezone.now().date()
+                
+                # Check if there's a latest submission to determine the next period
+                latest = obj.submissions.order_by('-period_end_date').first()
+                
+                if not latest or latest.period_end_date < today:
+                    # No submissions exist, or latest period has ended - create new submission
+                    if not latest:
+                        # First submission for this category
+                        start_date = today
+                    else:
+                        # Latest period ended, start new period
+                        start_date = latest.period_end_date + timedelta(days=1)
+                    
+                    due_date_obj = obj.calculate_next_due_date(start_date)
+                    due_date = due_date_obj.date() if hasattr(due_date_obj, 'date') else due_date_obj
+                    
+                    submission = EvidenceSubmission.objects.create(
+                        category=obj,
+                        period_start_date=start_date,
+                        period_end_date=due_date - timedelta(days=1),
+                        due_date=due_date,
+                        status=EvidenceStatus.PENDING
+                    )
+                else:
+                    # Latest submission period hasn't ended, but it's APPROVED/REJECTED
+                    # Create a new PENDING submission for the current period starting today
+                    start_date = today
+                    # Use the latest submission's due_date if it's in the future, otherwise calculate new one
+                    if latest.due_date > today:
+                        due_date = latest.due_date
+                        period_end_date = latest.period_end_date
+                    else:
+                        due_date_obj = obj.calculate_next_due_date(start_date)
+                        due_date = due_date_obj.date() if hasattr(due_date_obj, 'date') else due_date_obj
+                        period_end_date = due_date - timedelta(days=1)
+                    
+                    submission = EvidenceSubmission.objects.create(
+                        category=obj,
+                        period_start_date=start_date,
+                        period_end_date=period_end_date,
+                        due_date=due_date,
+                        status=EvidenceStatus.PENDING
+                    )
+       
             if not submission:
                 return None
             
             # Serialize the submission
             submission_data = EvidenceSubmissionSerializer(submission, context=self.context).data
             
-            # Filter files to only include those with status SUBMITTED or UNDER_REVIEW
+            # Filter files to include those with status PENDING, SUBMITTED, or UNDER_REVIEW
             # Ensure files is always a list (never None or missing)
             files = submission_data.get('files')
             if files is None:
@@ -126,7 +175,7 @@ class EvidenceCategorySerializer(serializers.ModelSerializer):
             
             submission_data['files'] = [
                 file for file in files
-                if file.get('status') in [EvidenceStatus.SUBMITTED, EvidenceStatus.UNDER_REVIEW]
+                if file.get('status') in [EvidenceStatus.PENDING, EvidenceStatus.SUBMITTED, EvidenceStatus.UNDER_REVIEW]
             ]
             
             return submission_data
